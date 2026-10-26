@@ -19,9 +19,11 @@ Public URL: **https://echo-the-awakening.pages.dev/**. Repository: **https://git
 
 GitHub CI is defined in `.github/workflows/ci.yml` on every push and pull request. The initial push passed its real Linux workflow, including installation, TypeScript, lint, 38 tests, build and output audit.
 
-On 26 October 2026, the existing project's **Settings → Git repository → Connect** accepted `AVL05/echo-the-awakening`. The saved settings show production `main`, automatic deployments enabled, command `npm run build` and output `dist`. No project recreation or deployment token was needed. This account's dashboard accepted the connection despite the older [Direct Upload documentation](https://developers.cloudflare.com/pages/get-started/direct-upload/) describing migration as unsupported. A subsequent normal push is being used to verify the actual delivery, rather than treating the saved form as deployment proof.
+On 26 October 2026, the existing project's **Settings → Git repository → Connect** accepted `AVL05/echo-the-awakening`. The saved settings show production `main`, automatic deployments enabled, command `npm run build` and output `dist`. No project recreation or deployment token was needed. This account's dashboard accepted the connection despite the older [Direct Upload documentation](https://developers.cloudflare.com/pages/get-started/direct-upload/) describing migration as unsupported.
 
-GitHub Actions and Pages builds run independently. `npm run build` runs lint and unit tests in its prebuild hook, then generates notices, typechecks and builds. Failing checks therefore prevent a native build from publishing regardless of CI completion order. CI additionally audits the output with `check:release`.
+**Automatic delivery verified:** normal push [`aa548c8`](https://github.com/AVL05/echo-the-awakening/commit/aa548c84b5da2c9bec5cd642e334658dff8a7cd5) triggered production deployment `95911f50-0f49-4abf-8c0d-9643a59ef5af` in the same project. Both the native **Cloudflare Pages** check and [GitHub Actions run](https://github.com/AVL05/echo-the-awakening/actions/runs/40338852035) completed successfully. Later releases can be traced through the same checks on each commit.
+
+GitHub Actions and Pages builds run independently. `npm run build` runs lint and unit tests in prebuild, generates notices, typechecks and builds, then audits the output in postbuild. Failing checks therefore prevent native publication regardless of CI completion order. CI also exposes each check as a separate step.
 
 If GitHub access is requested, authorize the official Cloudflare app for `AVL05/echo-the-awakening`, preserving existing repository selections. Never put credentials in source, workflow YAML, a committed `.env` or build output.
 
@@ -29,7 +31,7 @@ If GitHub access is requested, authorize the official Cloudflare app for `AVL05/
 
 Before pushing: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm run check:release`. CI uses `npm ci` and those checks. After delivery, compare the deployed commit with `main`, inspect the Cloudflare build log, and verify HTTPS, `/`, `/behind-the-system`, CSP, model consent, both endings and renderer fallback separately.
 
-`node scripts/check-public.mjs https://echo-the-awakening.pages.dev` compares local `dist` to public assets, headers, routes and private-path responses. Use a matching Linux build to compare OS-dependent development-license inventory entries; Windows/Linux may install different optional packages. Application asset differences must not be dismissed as an OS artifact.
+`node scripts/check-public.mjs https://echo-the-awakening.pages.dev` strictly compares local `dist` to public assets, headers, routes and private-path responses. License texts use canonical LF line endings and the public inventory describes distributed runtime dependencies, excluding OS-specific development packages. This keeps the metadata reproducible across Windows and Linux without weakening hash checks.
 
 For a failed release, use the **existing project's** Deployments → last verified production deployment → Rollback. Alternatively, revert the faulty commit normally and push. Never force-push or overwrite remote history. Saves remain in the player's browser; there is no database migration.
 

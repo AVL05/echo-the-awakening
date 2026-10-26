@@ -16,9 +16,9 @@ This grant does not replace licenses attached to third-party dependencies or mod
 | Zustand | MIT |
 | WebLLM / MLC runtime | Apache-2.0 |
 
-Exact installed packages, versions, scopes and license-text hashes are listed in [public/licenses.json](public/licenses.json). [public/THIRD_PARTY_NOTICES.txt](public/THIRD_PARTY_NOTICES.txt) includes license texts for distributed runtime packages and transitives. The repository does not vendor `node_modules/`; npm installs packages under their respective licenses.
+Distributed runtime packages, versions and hashes of LF-normalized license texts are listed in [public/licenses.json](public/licenses.json). [public/THIRD_PARTY_NOTICES.txt](public/THIRD_PARTY_NOTICES.txt) includes those license texts and transitives. The repository does not vendor `node_modules/`; npm installs packages under their respective licenses.
 
-`npm run licenses` regenerates the inventory from the lockfile and installed files, rejects unsupported/unknown runtime licenses and includes the model notice. Optional development packages vary by OS, so their inventory entries may differ between Windows and Linux. Runtime notices and model integrity must remain valid on both.
+`npm run licenses` regenerates the runtime inventory from the lockfile and installed files, normalizes license line endings, rejects unsupported/unknown runtime licenses and includes the model notice. Development dependencies remain recorded in the lockfile; OS-specific development packages are not published in the runtime inventory.
 
 React Three Fiber 9.8.2's published npm package declares MIT but omits LICENSE. Its official text is retained in [licenses/react-three-fiber-LICENSE.txt](licenses/react-three-fiber-LICENSE.txt), with its pinned upstream URL in [licenses/sources.json](licenses/sources.json).
 

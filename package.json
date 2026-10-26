@@ -15,6 +15,7 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "prebuild": "npm run lint && npm test && node scripts/licenses.mjs",
+    "postbuild": "node scripts/check-dist.mjs",
     "check:release": "node scripts/check-dist.mjs",
     "licenses": "node scripts/licenses.mjs"
   },

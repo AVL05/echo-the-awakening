@@ -20,5 +20,7 @@ for (const required of ['wasm-unsafe-eval', "frame-ancestors 'none'", "form-acti
 assert(headers.split('\n').every(line => line.length < 2000), 'Cabecera demasiado larga para Pages.');
 assert((await readFile(join(dist, '_redirects'), 'utf8')).includes('/behind-the-system /index.html 200'), 'Falta la ruta técnica.');
 const license = JSON.parse(await readFile(join(dist, 'licenses.json'), 'utf8'));
+assert(!(await readFile(join(dist, 'THIRD_PARTY_NOTICES.txt'), 'utf8')).includes('\r\n'), 'Los avisos deben usar saltos LF reproducibles.');
+assert(license.packages.length > 0 && license.packages.every(pkg => pkg.scope === 'runtime'), 'El inventario público debe describir solo las dependencias distribuidas.');
 assert(license.model.bundledWeights === false && /\/resolve\/[a-f0-9]{40}\//.test(license.model.weights), 'El modelo debe ser voluntario y fijado a una revisión.');
 console.log(JSON.stringify({ status: 'PASS', files: files.length, totalBytes: files.reduce((s, f) => s + f.bytes, 0), largest: [...files].sort((a, b) => b.bytes - a.bytes).slice(0, 5), scope: 'Local static audit only; verify the deployed URL separately with check-public.mjs and browser tests.' }, null, 2));
