@@ -17,9 +17,9 @@ Public URL: **https://echo-the-awakening.pages.dev/**. Repository: **https://git
 
 ## Integration status
 
-GitHub CI is defined in `.github/workflows/ci.yml` on every push and pull request. The native Cloudflare Git connection is being configured against the existing project. Successful setup and a push-triggered deployment must be checked before claiming continuous delivery is operational.
+GitHub CI is defined in `.github/workflows/ci.yml` on every push and pull request. The initial push passed its real Linux workflow, including installation, TypeScript, lint, 38 tests, build and output audit.
 
-The project originally used Direct Upload. [Its official documentation](https://developers.cloudflare.com/pages/get-started/direct-upload/) says such projects cannot switch to Git integration. The current authenticated dashboard nevertheless exposes **Settings → Git repository → Connect** on this project. A form alone does not prove migration support: only a successful connection and actual deployment can resolve that discrepancy. Do not delete/recreate the project or substitute a second project to bypass it.
+On 26 October 2026, the existing project's **Settings → Git repository → Connect** accepted `AVL05/echo-the-awakening`. The saved settings show production `main`, automatic deployments enabled, command `npm run build` and output `dist`. No project recreation or deployment token was needed. This account's dashboard accepted the connection despite the older [Direct Upload documentation](https://developers.cloudflare.com/pages/get-started/direct-upload/) describing migration as unsupported. A subsequent normal push is being used to verify the actual delivery, rather than treating the saved form as deployment proof.
 
 GitHub Actions and Pages builds run independently. `npm run build` runs lint and unit tests in its prebuild hook, then generates notices, typechecks and builds. Failing checks therefore prevent a native build from publishing regardless of CI completion order. CI additionally audits the output with `check:release`.
 
