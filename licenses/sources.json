@@ -1,0 +1,7 @@
+{
+  "@react-three/fiber@9.8.2": {
+    "file": "react-three-fiber-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/226d2ec45026688f5e92389e4420b2570194ca3d/LICENSE",
+    "note": "Installed package declares MIT but omits LICENSE; notice obtained from the official license-file revision."
+  }
+}
