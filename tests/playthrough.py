@@ -110,7 +110,7 @@ with sync_playwright() as p:
             page.wait_for_timeout(1200)
             page.screenshot(path=str(root/'outputs'/f'echo-cinema-{len(narrative_checks)}.png'))
             page.get_by_role('button',name='Omitir secuencia').click()
-            page.wait_for_function("qaGame.getState().phase !== 'cinematic'")
+            page.wait_for_function("()=>qaGame.getState().phase !== 'cinematic'")
             narrative_checks.append('camera sequence rendered and skipped')
 
     def walk(x, z):
@@ -278,7 +278,7 @@ with sync_playwright() as p:
     walk(4,-46);walk(4,-58);walk(0,-59);walk(0,-63.8)
     aim(0,1.7,-66)
     page.keyboard.down('w');page.wait_for_timeout(700);page.keyboard.up('w')
-    page.wait_for_function("qaGame.getState().phase==='cinematic'")
+    page.wait_for_function("()=>qaGame.getState().phase==='cinematic'")
     skip_cinema()
     title='Una voz, diecisiete ecos.' if ending=='preserve' else 'El último silencio.'
     expect(page.get_by_role('heading',name=title,exact=True)).to_be_visible(timeout=5000)

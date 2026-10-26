@@ -28,7 +28,7 @@ with sync_playwright() as p:
     context.route('**/*',route_request)
     page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto('http://127.0.0.1:5173/__echo_cache_probe.html',wait_until='networkidle')
-    page.wait_for_function('!!window.modelWorker')
+    page.wait_for_function('()=>!!window.modelWorker')
     sequence=0
     def request(kind,**data):
         global sequence

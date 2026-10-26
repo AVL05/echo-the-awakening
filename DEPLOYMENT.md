@@ -25,6 +25,8 @@ On 26 October 2026, the existing project's **Settings → Git repository → Con
 
 GitHub Actions and Pages builds run independently. `npm run build` runs lint and unit tests in prebuild, generates notices, typechecks and builds, then audits the output in postbuild. Failing checks therefore prevent native publication regardless of CI completion order. CI also exposes each check as a separate step.
 
+CI audits the complete dependency tree for high/critical advisories. Vitest is pinned to 4.1.12 to address the mocker/tinypool advisories found during publication; this retains all 38 tests and the existing Vite version. Browser waits use function predicates compatible with the production CSP, without enabling JavaScript `unsafe-eval`.
+
 If GitHub access is requested, authorize the official Cloudflare app for `AVL05/echo-the-awakening`, preserving existing repository selections. Never put credentials in source, workflow YAML, a committed `.env` or build output.
 
 ## Verification and rollback

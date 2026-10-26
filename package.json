@@ -5,7 +5,10 @@
   "description": "A cinematic browser sci-fi experience with optional on-device AI and deterministic gameplay.",
   "license": "MIT",
   "homepage": "https://echo-the-awakening.pages.dev/",
-  "repository": { "type": "git", "url": "https://github.com/AVL05/echo-the-awakening.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AVL05/echo-the-awakening.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -38,6 +41,6 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.0",
     "vite": "^7.2.0",
-    "vitest": "^3.2.4"
+    "vitest": "4.1.12"
   }
 }

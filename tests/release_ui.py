@@ -41,7 +41,7 @@ with sync_playwright() as p:
     page.get_by_role('button',name='START EXPERIENCE').click()
     if page.get_by_role('button',name='Entendido',exact=True).count():page.get_by_role('button',name='Entendido',exact=True).click()
     page.evaluate("async()=>{const url=performance.getEntriesByType('resource').find(e=>new URL(e.name).pathname==='/src/game/telemetry.ts').name;window.releaseTelemetry=(await import(url)).useTelemetry;window.playMetricStarted=performance.now()}")
-    page.wait_for_function("releaseTelemetry.getState().metrics.sampledAt > playMetricStarted+500")
+    page.wait_for_function("()=>releaseTelemetry.getState().metrics.sampledAt > playMetricStarted+500")
     assert float(page.locator('.compact-metrics').get_attribute('data-fps'))>0
     assert int(page.locator('.compact-metrics').get_attribute('data-draw-calls'))>0
     page.screenshot(path=str(root/'outputs'/'release-metrics-overlay.png'))
