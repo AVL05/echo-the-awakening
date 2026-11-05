@@ -32,7 +32,7 @@ function storySystem(p: Progress) {
 "Borra las memorias" -> {"reply":"Propondré el borrado irreversible.","actions":[{"name":"choose_protocol","target":"protocol","source":"none","destination":"none","value":"erase"}]}`;
   const decisions = `
 For confronting ECHO use record_decision target=echo value=confront; trust uses value=trust. Chronology value is 3 event IDs separated by commas: copy,quarantine,cut in the requested order. Calibrate value is 3 digits (C,R,A), each0..4. Preserving/burning requires verified archive and ethics document; the game enforces it.`;
-  const clues = `${p.story.documents.includes('manual') ? ' Cooling=2*Containment. Analysis=Containment+1.' : ''}${p.story.documents.includes('measurements') ? ' Total=9.' : ''}${p.story.documents.includes('evacuation') ? ' cut04:17.' : ''}${p.story.documents.includes('copy') ? ' copy04:14.' : ''}${p.story.documents.includes('quarantine') ? ' quarantine04:16.' : ''}`;
+  const clues = `${p.story.documents.includes('manual') ? ' Cooling=2*Containment. Analysis=Containment+1.' : ''}${p.story.documents.includes('measurements') ? ' Total=9.' : ''}${p.story.documents.includes('evacuation') ? ' cut04:17, emergency controls failed before cut.' : ''}${p.story.documents.includes('copy') ? ' copy04:14, lot C17 completed without consent.' : ''}${p.story.documents.includes('quarantine') ? ' Closure clock overwritten; closure signed with completed C17 hash.' : ''}${p.story.escape.waferRead ? ' Independent reader: closure confirmation used carrier destroyed by cut. These are dependencies, not evidence of consciousness.' : ''}`;
   return common + examples + decisions + '\nKnown evidence:' + clues;
 }
 

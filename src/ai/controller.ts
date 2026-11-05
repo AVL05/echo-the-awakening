@@ -139,6 +139,7 @@ async function interpret(input: string): Promise<Interpretation | null> {
   const result = action ? applyAction(action, context) : undefined;
   traceStep(traceId, 'interpreted', origin === 'llm' ? 'Salida JSON estructurada de la inferencia local.' : 'Interpretación mediante reglas; sin inferencia de LLM.', { origin, action });
   traceStep(traceId, result?.ok === false ? 'rejected' : 'validated', result?.text ?? 'Conversación sin acciones.');
+  if (result && !result.ok && result.progress !== context) useGame.getState().save(result.progress, traceId);
   activeTrace = undefined;
   const proposed = action && result?.ok && !['inspect', 'query_status'].includes(action.name) ? action : undefined;
   if (proposed) { proposal = { action: JSON.stringify(proposed), traceId }; traceStep(traceId, 'confirmation', 'Se requiere confirmación explícita. Los dispositivos y decisiones todavía no han cambiado.'); }
@@ -163,7 +164,10 @@ function confirm(action: Action): ActionResult {
     if (!s.progress.power && result.progress.power) chime('power');
     else if (!s.progress.door && result.progress.door) chime('door');
     else chime('terminal');
-  } else chime('denied');
+  } else {
+    if (result.progress !== s.progress) s.save(result.progress, traceId);
+    chime('denied');
+  }
   useEchoAi.setState(state => ({ history: state.history.map((turn, i) => i === state.history.length - 1 ? { ...turn, assistant: result.text.slice(0, 160) } : turn), diagnostics: state.diagnostics.map((entry, i) => i === state.diagnostics.length - 1 ? { ...entry, outcome: `${result.ok ? 'Ejecutada' : 'Rechazada'}: ${result.text}` } : entry) }));
   return result;
 }

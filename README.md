@@ -6,7 +6,7 @@ A first-person science-fiction experience built for the browser. Explore an aban
 
 **[Play the demo](https://echo-the-awakening.pages.dev/) · [Behind the System](https://echo-the-awakening.pages.dev/behind-the-system)**
 
-Three connected zones, three puzzles, seven discoverable records and two endings. The entire chapter works without a language model. Optional on-device inference gives ECHO another way to interpret your instructions and propose actual game actions.
+Three connected zones, six connected mechanisms, seven discoverable records and two endings. The entire chapter works without a language model. Optional on-device inference gives ECHO another way to interpret your instructions and propose actual game actions.
 
 Current in-game language: **Spanish**. Desktop and touch controls are included. The 10–15 minute playtime is a design target, not a measured average from player research.
 
@@ -30,7 +30,7 @@ Original, unretouched browser captures: WebGPU, medium profile, DPR 1. These sel
 | Area | Implementation |
 | --- | --- |
 | Application | React 19, TypeScript, Vite |
-| Graphics | Three.js r186, React Three Fiber 9.8; WebGPU with WebGL 2 fallback |
+| Graphics | Three.js r186, React Three Fiber 9.8; conservative WebGL 2 default, selectable WebGPU with fallback |
 | Materials | Procedural PBR maps, TSL energy, fog, particles and approximate reflections |
 | Gameplay | Zustand, deterministic puzzle rules, raycasting, custom movement/collision |
 | Audio | Web Audio synthesis, without downloaded recordings |
@@ -63,9 +63,15 @@ Production preview normally runs at `http://127.0.0.1:4173/`. The build also run
 
 ## Controls and recovery
 
-**WASD** moves, the **mouse** looks, **E** interacts, **J** opens discoveries and **Esc** pauses. Arrow keys provide keyboard movement/turning. Settings offer drag-to-look instead of pointer capture. On touch devices, use the directional pad while dragging the scene with another finger.
+**WASD** moves, the **mouse** looks, **E** interacts, **R** turns a pointed laboratory regulator without opening its panel, **J** opens discoveries and **Esc** pauses. Arrow keys provide keyboard movement/turning. Settings offer drag-to-look instead of pointer capture. On touch devices, use the directional pad while dragging the scene with another finger.
 
 Actions save progress to localStorage with a previous-revision backup. Continuing places you at a safe zone checkpoint, rather than your exact former position. Corrupt saves are repaired or recovered from backup. If storage is unavailable, the game remains playable for that session and warns that progress cannot be saved. Restarting requires confirmation and removes only ECHO's save and backup.
+
+## Performance profiles
+
+Automatic starts conservatively: Laptop on desktop controls, Low on touch controls. Laptop targets 60 FPS, caps the render target at 1.2 million pixels and preserves native resolution when that budget allows it. Mean/p95 frame times first reduce DPR; sustained pressure then reduces shadow refresh from 8 to 4/2 Hz and dust density. Recovery is slower, with a 12-second cooldown; shadow-map size and material presets remain fixed. Medium and High retain their visual budgets. Menus render at 30 FPS, inference at 10 FPS, and paused/hidden scenes stop.
+
+Settings can switch between WebGL 2 and WebGPU, reloading at the saved checkpoint. Compare p95 and frame spikes on your own device; no automatic runtime benchmark or backend switch interrupts play. Rooms prepare shell/content in idle stages, upload textures in batches and warm shaders before entry. The performance panel reports FPS, mean/p95/peak frame interval, CPU submission time, draw calls and available memory APIs. See [scope, manual comparison and historical measurements](docs/PERFORMANCE.md). The [escape-room design and implementation](docs/ESCAPE_ROOM.md) describes parallel laboratory investigations, physical mirror controls, comparative evidence and human confirmation at the independent final console. Player timing and difficulty remain unverified by human playtesting.
 
 ## Optional local AI
 
@@ -110,7 +116,7 @@ Repeated structures use instancing and shared procedural maps. Later zones initi
 
 ## Tests and limits
 
-The **38 Vitest tests** cover puzzle prerequisites, both protocols, invalid actions, persistence repair, capability checks, bounded traces and Worker lifecycle with explicitly mocked transport. Unit tests do **not** prove real inference.
+The Vitest suite covers puzzle prerequisites, both protocols, invalid actions, persistence repair, capability checks, bounded traces and Worker lifecycle with explicitly mocked transport. Unit tests do **not** prove real inference.
 
 [Browser scripts](tests/) separately test physical WASD/mouse campaigns, production headers, WebGPU/WebGL fallback, optional real inference and explicit UI/checkpoint fixtures. They require Python, installed Chrome and Playwright:
 
@@ -120,6 +126,8 @@ node -e "['work/temp','outputs'].forEach(p=>require('node:fs').mkdirSync(p,{recu
 python tests/production_smoke.py http://127.0.0.1:4173/
 python tests/playthrough.py http://127.0.0.1:4173/
 ```
+
+The comparative evidence UI, keyboard focus, 390px layout, physical mirror/regulator raycasting and both final confirmations can also be checked against the development server with `python tests/escape_ui.py http://127.0.0.1:5173/`. This script explicitly places the camera and prepares coherent state fixtures; it is not a complete physical campaign, a physical-mobile test or real-inference evidence.
 
 Set `ECHO_TEST_AI=1` and `ECHO_ENDING=erase` before `playthrough.py` for an opt-in real-inference campaign, downloading the same model in an isolated test profile. Reports/profiles go to ignored `outputs/` and `work/`. GPU browser scripts are not claimed as GitHub-hosted CI coverage.
 

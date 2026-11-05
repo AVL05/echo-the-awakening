@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { echoAi, useEchoAi } from '../src/ai/controller';
 import { useGame } from '../src/game/store';
-import { INITIAL } from '../src/game/progress';
+import { INITIAL, restoreSave, type Progress } from '../src/game/progress';
+import { updateStory } from '../src/game/story';
+import { runStoryAction } from '../src/game/actions';
 import { useCapabilities } from '../src/ai/capabilities';
 import { INFERENCE_TIMEOUT_MS, LOAD_TIMEOUT_MS } from '../src/ai/model';
 import type { WorkerRequest, WorkerResponse } from '../src/ai/protocol';
@@ -36,6 +38,24 @@ async function ready() {
 }
 
 describe('worker lifecycle and game authority (mock transport, not real inference)', () => {
+  it('counts rejected puzzle attempts once across buttons, deterministic text and model output', async () => {
+    const progress: Progress = updateStory(restoreSave(JSON.stringify({ cell: true, power: true, door: true, complete: false })), { documents: ['manual', 'measurements'] });
+    useGame.setState({ progress });
+    runStoryAction('calibrate', '333');
+    const buttonResult = useGame.getState().progress;
+    for (const model of [false, true]) {
+      useGame.setState({ progress });
+      const worker = model ? await ready() : null;
+      const request = echoAi.interpret('Calibra 3,3,3');
+      worker?.reply({ type: 'result', raw: '{"reply":"Propondré esos valores.","actions":[{"name":"calibrate","target":"lab","source":"none","destination":"none","value":"333"}]}', finishReason: 'stop', tokens: 50, elapsedMs: 5 });
+      const reply = await request;
+      expect(reply?.result?.ok).toBe(false);
+      expect(reply?.proposal).toBeUndefined();
+      expect(useGame.getState().progress.story.stats.mistakes).toBe(buttonResult.story.stats.mistakes);
+      expect(useGame.getState().progress.story.dials).toEqual(progress.story.dials);
+    }
+    expect(buttonResult.story.stats.mistakes).toBe(1);
+  });
   it('releases the real runtime interface and blocks new inference after the erase protocol', async () => {
     const worker = await ready();
     const p = useGame.getState().progress;
@@ -55,13 +75,13 @@ describe('worker lifecycle and game authority (mock transport, not real inferenc
     expect(useGame.getState().progress.door).toBe(false);
   });
   it('accepts each pending proposal only once', async () => {
-    useGame.setState({ progress: { ...INITIAL, cell: true, installed: true } });
+    useGame.setState({ progress: restoreSave(JSON.stringify({ cell: true, installed: true, power: false, door: false, complete: false })) });
     const result = await echoAi.interpret('Activa el reactor');
     expect(echoAi.confirm(result!.proposal!).ok).toBe(true);
     expect(() => echoAi.confirm(result!.proposal!)).toThrow('caducado');
   });
   it('invalidates a pending proposal when discarding, releasing or reloading the model', async () => {
-    useGame.setState({ progress: { ...INITIAL, cell: true, installed: true } });
+    useGame.setState({ progress: restoreSave(JSON.stringify({ cell: true, installed: true, power: false, door: false, complete: false })) });
     const first = await echoAi.interpret('Activa el reactor');
     echoAi.discard();
     expect(() => echoAi.confirm(first!.proposal!)).toThrow('caducado');

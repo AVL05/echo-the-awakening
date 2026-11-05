@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { AdditiveBlending, BackSide, CanvasTexture, DoubleSide, Group, Mesh, MeshStandardMaterial, PointLight, SpriteMaterial, type Texture } from 'three';
 import { useGame } from '../game/store';
-import { labelTexture, reflectionEnvironment, surfaceDetails, surfaceTexture, sharedFloor, disposeSharedFloor, UNIT_BOX } from './materials';
+import { labelTexture, reflectionEnvironment, surfaceDetails, surfaceTexture, sharedFloor, disposeSharedFloor, floorOcclusion, UNIT_BOX } from './materials';
 import Industrial, { AtmosphericDust, BoxInstances, ReactorField, type BoxInstance } from './Industrial';
-import { isSceneVisible } from './visibility';
+import { isSceneVisible, suspendHiddenUpdates } from './visibility';
 import { GRAPHICS } from '../game/graphics';
+import { setRoomAudio } from '../game/audio';
 
 type Position = [number, number, number];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -15,15 +16,16 @@ export function Box({ position, size, color = '#252e30', metal = 0.65, rough = 0
 }) {
   const key = [color, metal, rough, glow, map?.uuid].join('|');
   if (!boxMaterials.has(key)) boxMaterials.set(key, new MeshStandardMaterial({ color, metalness: metal, roughness: rough, map: map ?? null, bumpMap: bump ?? null, bumpScale: 0.035, roughnessMap: roughMap ?? null, emissive: glow ?? '#000000', emissiveIntensity: glow ? 2.5 : 0 }));
-  return <mesh position={position} rotation={rotation} scale={size} geometry={UNIT_BOX} material={boxMaterials.get(key)} castShadow={!glow && Math.min(...size) > 0.12} receiveShadow dispose={null} />;
+  return <mesh position={position} rotation={rotation} scale={size} matrixAutoUpdate={false} onUpdate={mesh => mesh.updateMatrix()} geometry={UNIT_BOX} material={boxMaterials.get(key)} castShadow={!glow && Math.min(...size) > 0.12} receiveShadow dispose={null} />;
 }
 
 export function Sign({ text, position, size = [2.4, 0.6], color, rotation = [0, 0, 0] }: {
   text: string; position: Position; size?: [number, number]; color?: string; rotation?: Position;
 }) {
-  const map = useMemo(() => labelTexture(text, color), [text, color]);
+  const detail = useGame(s => GRAPHICS[s.tier].detail);
+  const map = useMemo(() => labelTexture(text, color, detail ? 1024 : 512), [text, color, detail]);
   useEffect(() => () => map.dispose(), [map]);
-  return <mesh position={position} rotation={rotation}>
+  return <mesh position={position} rotation={rotation} matrixAutoUpdate={false} onUpdate={mesh => mesh.updateMatrix()}>
     <planeGeometry args={size} /><meshBasicMaterial map={map} transparent depthWrite={false} side={DoubleSide} />
   </mesh>;
 }
@@ -33,6 +35,7 @@ function Reactor() {
   const ring = useRef<Group>(null);
   const power = useGame(s => s.progress.power);
   const color = power ? '#79e8dc' : '#eab477';
+  const initialIntensity = useRef(power ? 2 : .55);
   const halo = useMemo(() => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
     const ctx = canvas.getContext('2d')!, gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
@@ -41,6 +44,7 @@ function Reactor() {
     return new CanvasTexture(canvas);
   }, []);
   const haloMaterial = useRef<SpriteMaterial>(null);
+  const coreMaterial = useRef<MeshStandardMaterial>(null);
   useEffect(() => () => halo.dispose(), [halo]);
   const segments = useMemo<BoxInstance[]>(() => Array.from({ length: 32 }, (_, i) => {
     const a = i / 32 * Math.PI * 2;
@@ -48,8 +52,16 @@ function Reactor() {
   }), []);
   const insets = useMemo<BoxInstance[]>(() => segments.map(item => ({ ...item, position: [item.position[0], item.position[1], 0.38], size: [0.26, 0.028, 0.025] })), [segments]);
   useFrame(({ clock }, dt) => {
-    if (haloMaterial.current) haloMaterial.current.opacity += ((power ? 0.48 : 0.24) - haloMaterial.current.opacity) * Math.min(dt, 0.05) * 2;
-    if (!isSceneVisible(core.current) || reducedMotion || useGame.getState().phase === 'paused') return;
+    if (!isSceneVisible(core.current) || useGame.getState().phase === 'paused') return;
+    if (coreMaterial.current) {
+      const target = power ? 2 : .55;
+      coreMaterial.current.emissiveIntensity = reducedMotion ? target : coreMaterial.current.emissiveIntensity + (target - coreMaterial.current.emissiveIntensity) * Math.min(dt, .05) * 1.4;
+    }
+    if (haloMaterial.current) {
+      const target = power ? 0.48 : 0.24;
+      haloMaterial.current.opacity = reducedMotion ? target : haloMaterial.current.opacity + (target - haloMaterial.current.opacity) * Math.min(dt, 0.05) * 2;
+    }
+    if (reducedMotion) return;
     if (core.current) {
       core.current.rotation.y += dt * (power ? 0.38 : 0.09);
       core.current.position.y = 3.3 + Math.sin(clock.elapsedTime * 0.8) * 0.12;
@@ -76,7 +88,7 @@ function Reactor() {
       </group>)}
     </group>
     <group ref={core} position={[0, 3.3, 0]}>
-      <mesh><icosahedronGeometry args={[0.65, 2]} /><meshStandardMaterial color="#b9c9b0" metalness={0.75} roughness={0.12} emissive={color} emissiveIntensity={power ? 2 : 0.55} /></mesh>
+      <mesh><icosahedronGeometry args={[0.65, 2]} /><meshStandardMaterial ref={coreMaterial} color="#b9c9b0" metalness={0.75} roughness={0.12} emissive={color} emissiveIntensity={initialIntensity.current} /></mesh>
       <mesh rotation={[0.4, 0, 0.3]}><icosahedronGeometry args={[1.1, 1]} /><meshBasicMaterial color={color} wireframe transparent opacity={0.4} /></mesh>
       {[0, 1, 2].map(i => <mesh key={i} rotation={[i * 0.8, i * 0.6, 0.3]}><torusGeometry args={[1.35 + i * 0.15, 0.012, 6, 72]} /><meshBasicMaterial color={color} transparent opacity={0.6} /></mesh>)}
     </group>
@@ -109,7 +121,8 @@ function Terminal() {
 }
 
 function Props() {
-  const { cell, power } = useGame(s => s.progress);
+  const cell = useGame(s => s.progress.cell), power = useGame(s => s.progress.power);
+  const locker = useGame(s => s.progress.story.escape.locker);
   const battery = useRef<Group>(null);
   useFrame(({ clock }) => {
     if (!isSceneVisible(battery.current) || reducedMotion || useGame.getState().phase === 'paused') return;
@@ -123,7 +136,7 @@ function Props() {
       <Box position={[0, 0.48, 0]} size={[1.3, 0.96, 1.3]} />
       <Box position={[0, 1, 0]} size={[1.6, 0.14, 1.6]} color="#545b54" />
       <Sign text="01 / RESERVA" position={[0, 0.7, 0.66]} size={[1.05, 0.26]} />
-      {!cell && <group ref={battery} position={[0, 1.55, 0]}>
+      {!cell && locker && <group ref={battery} position={[0, 1.55, 0]}>
         <mesh userData={{ interact: 'cell' }} castShadow><cylinderGeometry args={[0.18, 0.18, 0.8, 16]} /><meshStandardMaterial color="#c8c8b1" metalness={0.75} roughness={0.25} emissive="#ebae61" emissiveIntensity={0.4} /></mesh>
         {[-0.31, 0, 0.31].map(y => <mesh key={y} position={[0, y, 0]}><torusGeometry args={[0.19, 0.025, 6, 24]} /><meshBasicMaterial color="#ffc27f" /></mesh>)}
         <pointLight color="#ffbb72" intensity={7} distance={4} />
@@ -133,7 +146,7 @@ function Props() {
     <group position={[5.8, 0, -1.5]}>
       <Box position={[0, 0.95, 0]} size={[1.2, 1.9, 1.2]} color="#39423e" />
       <Box position={[0, 1.52, 0.62]} size={[0.95, 0.65, 0.06]} color="#101c1e" />
-      <mesh position={[0, 1.5, 0.7]} userData={{ interact: 'relay' }}><boxGeometry args={[1.2, 1.5, 0.25]} /><meshStandardMaterial color="#152323" transparent opacity={0.15} /></mesh>
+      <mesh position={[0, 1.5, 0.7]} userData={{ interact: 'relay' }}><boxGeometry args={[1.2, .9, 0.25]} /><meshStandardMaterial color="#152323" transparent opacity={0.15} /></mesh>
       {[0, 1, 2].map(i => <Box key={i} position={[-0.28 + i * 0.28, 1.52, 0.67]} size={[0.12, 0.37, 0.03]} glow={power ? '#7bdec5' : '#ab754b'} />)}
       <Sign text="02 / ENERGÍA" position={[0, 0.9, 0.62]} size={[1.05, 0.26]} />
       <pointLight position={[0, 2, 0.5]} color={power ? '#7bdec5' : '#d9a16b'} intensity={8} distance={4} />
@@ -187,6 +200,7 @@ function Door() {
 
 function ReactiveLighting() {
   const light = useRef<PointLight>(null), sweep = useRef<Mesh>(null);
+  const energy = useRef<Group>(null);
   const progress = useRef(useGame.getState().progress.power);
   const ramp = useRef(progress.current ? 1 : 0), elapsed = useRef(10), time = useRef(0);
   useFrame((_, delta) => {
@@ -197,31 +211,55 @@ function ReactiveLighting() {
     ramp.current += ((s.progress.power ? 1 : 0) - ramp.current) * dt * 1.3;
     if (light.current) light.current.intensity = 22 + ramp.current * 65 + (reducedMotion ? 0 : Math.sin(time.current * 1.1) * 2);
     if (sweep.current) {
-      const active = !reducedMotion && s.progress.power && elapsed.current < 4;
+      const active = s.effects && !reducedMotion && s.progress.power && elapsed.current < 4;
       sweep.current.visible = active;
       sweep.current.scale.setScalar(1 + elapsed.current * 3);
       (sweep.current.material as MeshStandardMaterial).opacity = Math.max(0, 0.45 - elapsed.current * 0.13);
     }
+    if (energy.current) {
+      energy.current.visible = s.effects && GRAPHICS[s.tier].beams && !reducedMotion && s.progress.power;
+      energy.current.position.z = 8.5 - (time.current * .32 % 1) * 20;
+    }
   });
   return <>
     <pointLight ref={light} position={[0, 4.3, 0.3]} color="#bbd6c4" intensity={22} distance={17} />
+    <group ref={energy} visible={false}>{[-1, 1].map(side => <mesh key={side} position={[side * 3.7, .04, 0]} raycast={() => {}}><boxGeometry args={[.08, .025, 1.1]} /><meshBasicMaterial color="#bcebd7" /></mesh>)}</group>
     <mesh ref={sweep} position={[0, 0.035, 0.2]} rotation={[-Math.PI / 2, 0, 0]} visible={false} raycast={() => {}}><ringGeometry args={[0.96, 1.0, 64]} /><meshBasicMaterial color="#c2e4ca" transparent opacity={0.4} depthWrite={false} blending={AdditiveBlending} /></mesh>
   </>;
 }
 
 export default function Room() {
+  const zone = useGame(s => s.progress.story.zone);
+  const isolated = useGame(s => s.progress.story.protocol === 'erase');
+  useEffect(() => setRoomAudio(zone, isolated), [zone, isolated]);
   const concrete = useMemo(() => surfaceTexture('concrete'), []);
   const detail = useMemo(sharedFloor, []);
   const floor = detail.map;
   const wallDetail = useMemo(() => surfaceDetails(concrete), [concrete]);
   const environment = useMemo(reflectionEnvironment, []);
+  const occlusion = useMemo(() => floorOcclusion(18, 30, -1.7, [[0, 0.2, 5.7, 5.7], [0, -4.5, 2.8, 1], [-5.5, 1.5, 1.6, 1.6], [-7.2, -6.5, 1.2, 8.2], [7.2, -6.5, 1.2, 8.2]]), []);
+  useEffect(() => () => occlusion.dispose(), [occlusion]);
   const { scene } = useThree();
   const tier = useGame(s => s.tier);
   const power = useGame(s => s.progress.power);
   const profile = GRAPHICS[tier];
+  const effects = useGame(s => s.effects);
+  const blackout = useGame(s => s.incident === 'blackout');
   const floorGuides = useMemo<BoxInstance[]>(() => [-1, 1].flatMap(side => Array.from({ length: 10 }, (_, i) => ({ position: [side * 3.7, 0.014, -10 + i * 2.4], size: [0.055, 0.02, 1.1] }))), []);
+  const structure = useMemo(() => {
+    const columns: BoxInstance[] = [], beams: BoxInstance[] = [], lights: BoxInstance[] = [];
+    for (let z = -10; z <= 10; z += 5) {
+      beams.push({ position: [0, 7.2, z], size: [17, 0.6, 0.6] });
+      for (const side of [-1, 1]) {
+        columns.push({ position: [side * 8.3, 3.4, z], size: [0.55, 6.8, 0.65] });
+        columns.push({ position: [side * 7.6, 6.5, z], size: [0.4, 2.3, 0.65], rotation: [0, 0, side * -0.7] });
+        lights.push({ position: [side * 8.25, 3.3, z + 0.36], size: [0.1, 0.9, 0.03] });
+      }
+    }
+    return { columns, beams, lights };
+  }, []);
   const visibleRoom = useRef<Group>(null);
-  useFrame(({ camera }) => { if (visibleRoom.current) visibleRoom.current.visible = camera.position.z > -24; });
+  useFrame(({ camera }) => { if (visibleRoom.current) visibleRoom.current.visible = camera.position.z > -24; }, -1);
   useEffect(() => { scene.environment = environment; scene.environmentIntensity = 0.48; return () => { scene.environment = null; }; }, [environment, scene]);
   useEffect(() => () => {
     concrete.dispose(); disposeSharedFloor(); wallDetail.bump.dispose(); wallDetail.roughness.dispose(); environment.dispose();
@@ -230,38 +268,35 @@ export default function Room() {
   return <>
     <color attach="background" args={['#0d171c']} />
     <fogExp2 attach="fog" args={['#17242a', tier === 'low' ? 0.022 : 0.027]} />
-    <ambientLight intensity={0.28} color="#7e9fa9" />
-    <hemisphereLight args={['#8ca9b2', '#20211d', 0.7]} />
-    <group ref={visibleRoom}>
-    <spotLight key={profile.shadowSize} position={[2, 7, 5]} color="#ffce94" intensity={280} angle={0.75} penumbra={0.8} distance={24} castShadow={profile.shadowSize > 0} shadow-mapSize={[profile.shadowSize || 512, profile.shadowSize || 512]} shadow-bias={-0.0007} shadow-normalBias={0.02} />
+    <ambientLight intensity={blackout ? 0.04 : 0.28} color="#7e9fa9" />
+    <hemisphereLight args={['#8ca9b2', '#20211d', blackout ? 0.12 : 0.7]} />
+    <group ref={visibleRoom} userData={{ sceneZone: 'containment' }} onUpdate={suspendHiddenUpdates}>
+    <spotLight key={profile.shadowSize} position={[2, 7, 5]} color="#ffce94" intensity={280} angle={0.75} penumbra={0.8} distance={24} castShadow={profile.shadowSize > 0} shadow-autoUpdate={tier !== 'laptop'} shadow-needsUpdate shadow-mapSize={[profile.shadowSize || 512, profile.shadowSize || 512]} shadow-bias={-0.0007} shadow-normalBias={0.02} />
     <pointLight position={[-6, 3, 5]} color="#e2ac77" intensity={45} distance={12} />
     <pointLight position={[6, 4, -7]} color="#719caf" intensity={50} distance={14} />
     <pointLight position={[0, 5, 9]} color="#b9c5c1" intensity={35} distance={20} />
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.015, -1.7]} receiveShadow><planeGeometry args={[18, 30]} /><meshStandardMaterial map={floor} bumpMap={tier === 'low' ? undefined : detail.bump} bumpScale={0.065} roughnessMap={detail.roughness} color="#9da69d" metalness={0.7} roughness={0.3} envMapIntensity={0.7} /></mesh>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.015, -1.7]} receiveShadow><planeGeometry args={[18, 30]} /><meshStandardMaterial map={floor} aoMap={occlusion} aoMapIntensity={0.65} bumpMap={profile.detail ? detail.bump : null} bumpScale={0.035} roughnessMap={detail.roughness} color="#9da69d" metalness={0.7} roughness={0.38} envMapIntensity={0.7} /></mesh>
     {[-1, 1].map(side => <group key={side}>
       <Box position={[side * 9, 3.9, 0]} size={[0.5, 7.8, 26]} color="#6a726d" map={concrete} bump={wallDetail.bump} roughMap={wallDetail.roughness} metal={0.1} rough={0.96} />
       <Box position={[side * 8.68, 1.0, 0]} size={[0.08, 0.05, 24]} glow="#aa794b" />
       <Box position={[side * 8.3, 6.4, 0]} size={[0.7, 0.4, 26]} color="#414b48" />
-      {Array.from({ length: 5 }, (_, i) => <group key={i} position={[0, 0, -10 + i * 5]}>
-        <Box position={[side * 8.3, 3.4, 0]} size={[0.55, 6.8, 0.65]} color="#364447" />
-        <Box position={[side * 7.6, 6.5, 0]} size={[0.4, 2.3, 0.65]} color="#364447" rotation={[0, 0, side * -0.7]} />
-        <Box position={[side * 8.25, 3.3, 0.36]} size={[0.1, 0.9, 0.03]} glow="#d1a06b" />
-        {side === 1 && <Box position={[0, 7.2, 0]} size={[17, 0.6, 0.6]} color="#334044" />}
-      </group>)}
       {[0, 1, 2].map(i => <mesh key={i} position={[side * (6.5 + i * 0.45), 7, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[0.12 + i * 0.04, 0.12 + i * 0.04, 26, 12]} /><meshStandardMaterial color="#4c5550" metalness={0.75} roughness={0.5} />
       </mesh>)}
       <Sign text="LAZARUS" position={[side * 8.7, 4.2, 0]} rotation={[0, side * -Math.PI / 2, 0]} size={[5.5, 1.4]} color="#94a09a" />
       <Sign text="07" position={[side * 8.7, 3, 5]} rotation={[0, side * -Math.PI / 2, 0]} size={[2, 0.8]} color="#c9b597" />
     </group>)}
+    <BoxInstances items={structure.columns} color="#364447" metal={0.65} roughness={0.65} shadow />
+    <BoxInstances items={structure.beams} color="#334044" metal={0.65} roughness={0.65} shadow />
+    <BoxInstances items={structure.lights} color="#252e30" metal={0.65} roughness={0.65} glow="#d1a06b" />
     <Box position={[0, 7.9, 0]} size={[18, 0.3, 26]} color="#1b282c" />
     <Box position={[0, 3.8, 13]} size={[18, 7.6, 0.4]} color="#414a46" map={concrete} bump={wallDetail.bump} roughMap={wallDetail.roughness} metal={0.1} />
     {[-5, 5].map(x => <group key={x}>
       <Box position={[x, 7.25, 2]} size={[0.8, 0.16, 5]} glow="#b4b6a0" />
-      {profile.beams && <mesh position={[x, 4.2, 2]} raycast={() => {}}><cylinderGeometry args={[0.2, 2.6, 6, 32, 1, true]} /><meshBasicMaterial color="#cfbd91" transparent opacity={0.013} depthWrite={false} side={BackSide} blending={AdditiveBlending} /></mesh>}
+      {profile.beams && effects && <mesh position={[x, 4.2, 2]} raycast={() => {}}><cylinderGeometry args={[0.2, 2.6, 6, 32, 1, true]} /><meshBasicMaterial color="#cfbd91" transparent opacity={0.013} depthWrite={false} side={BackSide} blending={AdditiveBlending} /></mesh>}
     </group>)}
     <BoxInstances items={floorGuides} color="#252e30" metal={0.65} roughness={0.65} glow={power ? '#b8d5bd' : '#8c7150'} />
-    <Industrial /><Reactor /><ReactorField /><Terminal /><Props /><Door /><AtmosphericDust /><ReactiveLighting />
+    <Industrial /><Reactor />{profile.beams && effects && <ReactorField />}<Terminal /><Props /><Door /><AtmosphericDust /><ReactiveLighting />
     </group>
   </>;
 }

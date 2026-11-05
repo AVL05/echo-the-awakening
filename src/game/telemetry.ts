@@ -4,9 +4,9 @@ import type { Progress } from './progress';
 
 export type Stage = 'received' | 'interpreted' | 'validated' | 'confirmation' | 'executed' | 'rejected' | 'cancelled' | 'saved' | 'error';
 export type Trace = { id: number; input: string; origin: 'llm' | 'deterministic' | 'physical'; started: number; action?: Action; steps: { stage: Stage; ms: number; detail: string }[]; changes?: Record<string, { before: unknown; after: unknown }> };
-export type Metrics = { fps: number | null; frameMs: number | null; drawCalls: number | null; triangles: number | null; geometries: number | null; textures: number | null; jsHeapBytes: number | null; rendererBytes: number | null; sampledAt: number; readyMs: number | null };
+export type Metrics = { fps: number | null; frameMs: number | null; p95: number | null; maxFrameMs: number | null; cpuFrameMs: number | null; slowFrames: number | null; fpsLimit: number | null; dpr: number | null; drawCalls: number | null; triangles: number | null; geometries: number | null; textures: number | null; jsHeapBytes: number | null; jsHeapLimitBytes: number | null; deviceMemoryGB: number | null; rendererBytes: number | null; sampledAt: number; readyMs: number | null };
 export const useTelemetry = create<{ metrics: Metrics; traces: Trace[]; panel: boolean }>(() => ({
-  metrics: { fps: null, frameMs: null, drawCalls: null, triangles: null, geometries: null, textures: null, jsHeapBytes: null, rendererBytes: null, sampledAt: 0, readyMs: null }, traces: [], panel: false,
+  metrics: { fps: null, frameMs: null, p95: null, maxFrameMs: null, cpuFrameMs: null, slowFrames: null, fpsLimit: null, dpr: null, drawCalls: null, triangles: null, geometries: null, textures: null, jsHeapBytes: null, jsHeapLimitBytes: null, deviceMemoryGB: null, rendererBytes: null, sampledAt: 0, readyMs: null }, traces: [], panel: false,
 }));
 let sequence = 0;
 export function beginTrace(input: string, origin: Trace['origin']) {
@@ -18,7 +18,7 @@ export function traceStep(id: number, stage: Stage, detail: string, patch: Parti
   useTelemetry.setState(s => ({ traces: s.traces.map(t => t.id === id ? { ...t, ...patch, steps: [...t.steps, { stage, ms: Math.max(0, performance.now() - t.started), detail: detail.slice(0, 500) }].slice(-12) } : t) }));
 }
 export function stateChanges(before: Progress, after: Progress): Trace['changes'] {
-  const fields = (p: Progress) => ({ cell: p.cell, installed: p.installed, power: p.power, door: p.door, complete: p.complete, dials: p.story.dials, labSolved: p.story.labSolved, archiveVerified: p.story.archiveVerified, stance: p.story.stance, protocol: p.story.protocol, documents: p.story.documents, hints: p.story.stats.hints, mistakes: p.story.stats.mistakes });
+  const fields = (p: Progress) => ({ cell: p.cell, installed: p.installed, power: p.power, door: p.door, complete: p.complete, dials: p.story.dials, labSolved: p.story.labSolved, archiveVerified: p.story.archiveVerified, stance: p.story.stance, protocol: p.story.protocol, documents: p.story.documents, escape: p.story.escape, hints: p.story.stats.hints, mistakes: p.story.stats.mistakes });
   const a = fields(before), b = fields(after);
   return Object.fromEntries((Object.keys(a) as (keyof typeof a)[]).filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k])).map(k => [k, { before: a[k], after: b[k] }]));
 }

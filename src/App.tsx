@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { interact, resume, openPanel, targetLabel, openTechnical, closeTechnical } from './game/actions';
+import { adjustRegulator, interact, resume, openPanel, targetLabel, openTechnical, closeTechnical } from './game/actions';
 import { chime, pauseAudio, setMuted, setReactorAudio, wakeAudio } from './game/audio';
 import { echoCommands } from './game/commands';
 import { objective, type Command } from './game/progress';
@@ -12,6 +12,10 @@ import { LoadBoundary, LoadingStatus } from './Boot';
 import { beginTrace, stateChanges, traceStep, useTelemetry } from './game/telemetry';
 import { Ending, NarrativePanels, StoryTerminal } from './StoryPanels';
 import { CINEMA_TEXT, ZONE_LABELS } from './game/story';
+import { QUALITY_LABELS } from './game/graphics';
+import EscapePanels from './EscapePanels';
+import NarrativeEvents from './NarrativeEvents';
+import { inventory, solvedPuzzles } from './game/escape';
 
 const World = lazy(() => import('./scene/World'));
 const BehindSystem = lazy(() => import('./BehindSystem'));
@@ -23,17 +27,25 @@ function Icon({ name }: { name: 'sound' | 'mute' | 'settings' | 'arrow' | 'pause
 }
 
 function Settings() {
-  const { quality, inputMode, set } = useGame();
+  const { quality, inputMode, effects, set } = useGame();
   const panel = useTelemetry(s => s.panel);
   return <div className="settings-fields">
     <label>Calidad gráfica <select value={quality} onChange={e => {
-      const quality = e.target.value as Quality; set({ quality, ...(quality === 'auto' ? {} : { tier: quality }) });
-    }}><option value="auto">Automático</option><option value="low">Bajo · Rendimiento</option><option value="medium">Medio · Equilibrado</option><option value="high">Alto · Cinematográfico</option></select></label>
+      const quality = e.target.value as Quality; set({ quality, resolutionScale: 1, performanceLevel: 0, tier: quality === 'auto' ? matchMedia('(pointer: coarse)').matches ? 'low' : 'laptop' : quality });
+    }}><option value="auto">Automático · Priorizar fluidez</option><option value="laptop">PORTÁTIL · Fluidez y memoria</option><option value="low">Bajo · Rendimiento</option><option value="medium">Medio · Equilibrado</option><option value="high">Alto · Cinematográfico</option></select></label>
+    <label className="metrics-toggle"><input type="checkbox" checked={effects} onChange={e => set({ effects: e.target.checked })} /> Efectos atmosféricos avanzados (perfiles Medio y Alto)</label>
+    <p className="fineprint">Automático y Portátil buscan 60 FPS y ajustan resolución, frecuencia de sombras y polvo con recuperación lenta. Medio y Alto conservan su detalle.</p>
+    <label>Motor gráfico (recarga la partida) <select value={new URLSearchParams(location.search).get('renderer') ?? 'auto'} onChange={e => {
+      const url = new URL(location.href);
+      if (e.target.value === 'auto') url.searchParams.delete('renderer'); else url.searchParams.set('renderer', e.target.value);
+      location.assign(url);
+    }}><option value="auto">Automático · WebGL 2 conservador</option><option value="webgl">WebGL 2</option><option value="webgpu">WebGPU · Comparar en este equipo</option></select></label>
+    <p className="fineprint">Compara ambos motores con el mismo perfil y recorrido: prioriza p95 y picos bajos frente al FPS máximo. Cambiar de motor recupera el último checkpoint guardado.</p>
     <label>Control de cámara <select value={inputMode} onChange={e => set({ inputMode: e.target.value as 'mouse' | 'drag' })}>
       <option value="mouse">Capturar ratón</option><option value="drag">Arrastrar para mirar</option>
     </select></label>
     <label className="metrics-toggle"><input type="checkbox" checked={panel} onChange={e => useTelemetry.setState({ panel: e.target.checked })} /> Mostrar métricas reales durante el juego</label>
-    <p className="fineprint">WASD para caminar · Ratón para mirar · E para interactuar · J para consultar el registro · Esc para pausar. También puedes mirar con ← → y avanzar con ↑ ↓.</p>
+    <p className="fineprint">WASD para caminar · Ratón para mirar · E para interactuar · R para girar un regulador señalado · J para consultar el registro · I para inventario · Esc para pausar. También puedes mirar con ← → y avanzar con ↑ ↓.</p>
     <p className="fineprint">En pantalla táctil, usa la cruceta y arrastra la escena para mirar.</p>
   </div>;
 }
@@ -88,18 +100,19 @@ function Terminal() {
 }
 
 function SystemCue() {
-  const [cue, setCue] = useState<'power' | 'door' | null>(null);
+  const [cue, setCue] = useState<'power' | 'door' | 'lab' | 'optics' | 'archive' | null>(null);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const unsubscribe = useGame.subscribe((next, previous) => {
-      const event = !previous.progress.power && next.progress.power ? 'power' : !previous.progress.door && next.progress.door ? 'door' : null;
+      const event = !previous.progress.power && next.progress.power ? 'power' : !previous.progress.door && next.progress.door ? 'door' : !previous.progress.story.labSolved && next.progress.story.labSolved ? 'lab' : !previous.progress.story.escape.opticsSolved && next.progress.story.escape.opticsSolved ? 'optics' : !previous.progress.story.archiveVerified && next.progress.story.archiveVerified ? 'archive' : null;
       if (event) { clearTimeout(timer); setCue(event); timer = setTimeout(() => setCue(null), 4800); }
       if (next.phase === 'intro') { clearTimeout(timer); setCue(null); }
     });
     return () => { unsubscribe(); clearTimeout(timer); };
   }, []);
   if (!cue) return null;
-  return <div className={`system-cue ${cue}`} key={cue} role="status"><span>{cue === 'power' ? 'SECUENCIA DE ARRANQUE COMPLETADA' : 'PROTOCOLO DE CUARENTENA ANULADO'}</span><strong>{cue === 'power' ? 'Lazarus vuelve a respirar.' : 'El umbral está abierto.'}</strong><i /></div>;
+  const text = { power: ['ARRANQUE COMPLETADO', 'Lazarus vuelve a respirar.'], door: ['CUARENTENA ANULADA', 'El umbral está abierto.'], lab: ['SUMINISTRO ESTABLE', 'Los cultivos recuperan su pulso.'], optics: ['CUSTODIA VERIFICADA', 'Una firma que ECHO no controla.'], archive: ['CRONOLOGÍA CONTRASTADA', 'El apagón no fue el principio.'] }[cue];
+  return <div className={`system-cue ${cue}`} key={cue} role="status"><span>{text[0]}</span><strong>{text[1]}</strong><i /></div>;
 }
 
 function TouchControls() {
@@ -121,7 +134,7 @@ function FirstSteps() {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed || progress.door || target || phase !== 'playing') return null;
   const touch = matchMedia('(pointer: coarse)').matches;
-  const step = !progress.cell ? '01 / Celda en el pedestal izquierdo.' : !progress.installed ? '02 / Celda al distribuidor derecho.' : '03 / Terminal ECHO junto al reactor.';
+  const step = 'Explora, examina y compara lo que encuentres.';
   return <aside className="first-steps" aria-label="Guía de primeros pasos"><span>PRIMEROS PASOS</span><strong>{step}</strong><p>{touch ? 'Cruceta para caminar. Arrastra para mirar. Apunta y pulsa Interactuar.' : 'WASD para caminar. Ratón para mirar; también puedes arrastrar desde ajustes. Apunta y pulsa E. El registro guarda tus pistas.'}</p><button onClick={() => setDismissed(true)}>Entendido</button></aside>;
 }
 
@@ -137,8 +150,10 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const intro = s.phase === 'intro';
+  const chapterReady = s.ready && (!s.progress.door || s.labReady) && (!s.progress.story.labSolved || s.coreReady);
   const completed = s.phase === 'complete' || (s.phase === 'technical' && s.progress.complete);
-  const step = s.progress.story.protocol !== 'none' ? 6 : s.progress.story.archiveVerified ? 5 : s.progress.story.labSolved ? 4 : s.progress.door ? 3 : s.progress.power ? 2 : s.progress.cell ? 1 : 0;
+  const step = solvedPuzzles(s.progress);
+  const hasProgress = s.progress.cell || s.progress.story.escape.inventory.length > 0 || step > 0;
   useEffect(() => { setMuted(s.muted); }, [s.muted]);
   useEffect(() => { const update = () => pauseAudio(document.hidden || ['paused', 'intro', 'complete', 'technical'].includes(s.phase)); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, [s.phase]);
   useEffect(() => { setReactorAudio(s.progress.power); }, [s.progress.power, s.phase]);
@@ -155,7 +170,7 @@ export default function App() {
   return <main className={intro ? 'experience is-intro' : 'experience'} data-phase={s.phase} data-power={s.progress.power}>
     <LoadBoundary><Suspense fallback={<div className="boot-screen" role="status">ESTABLECIENDO ENLACE CON LAZARUS<span /></div>}><World /></Suspense></LoadBoundary>
     <div className="cinematic-grain" aria-hidden="true" /><div className="vignette" aria-hidden="true" />
-    <SystemCue /><MetricsOverlay />
+    <SystemCue /><MetricsOverlay /><NarrativeEvents />
     <header className="topbar">
       <div className="wordmark"><span className="brand-symbol">E</span><span>LAZARUS<span className="brand-sub">RESEARCH INITIATIVE</span></span></div>
       <div className="chapter-label"><span className="status-dot" /> {ZONE_LABELS[s.progress.story.zone]} <span className="meta-divider">/</span> EL DESPERTAR</div>
@@ -171,10 +186,10 @@ export default function App() {
       <h1 id="game-title">ECHO<span>THE AWAKENING</span></h1>
       <div className="title-rule"><span>ARCHIVO DE INVESTIGACIÓN / 07</span></div>
       <p className="intro-quote">El silencio no significa<br />que estés solo.</p>
-      <p className="intro-copy">Una instalación olvidada. Una señal que sigue viva.<br />Tres puzles. Dos finales. IA local opcional.</p>
-      <button className="start-button" disabled={!s.ready} onClick={start}><span className="button-index">{s.ready ? '↳' : '·'}</span><span>{!s.ready ? 'ESTABLECIENDO ENLACE' : s.progress.complete ? 'VER DESENLACE' : step > 0 ? 'CONTINUE EXPERIENCE' : 'START EXPERIENCE'}</span><Icon name="arrow" /></button>
+      <p className="intro-copy">Despiertas encerrado. No recuerdas por qué.<br />Seis mecanismos. Dos desenlaces. Una voz que sabe más.</p>
+      <button className="start-button" disabled={!chapterReady} onClick={start}><span className="button-index">{chapterReady ? '↳' : '·'}</span><span>{!chapterReady ? 'ESTABLECIENDO ENLACE' : s.progress.complete ? 'VER DESENLACE' : hasProgress ? 'CONTINUE EXPERIENCE' : 'START EXPERIENCE'}</span><Icon name="arrow" /></button>
       {s.recovery && <p className="recovery-notice" role="status">{s.recovery === 'backup' ? 'Partida recuperada desde la copia anterior.' : s.recovery === 'repaired' ? 'El guardado no era válido. Se ha preparado un inicio seguro.' : 'Almacenamiento no disponible. Puedes jugar durante esta sesión.'}</p>}
-      <div className="start-caption"><span className="tiny-diamond" /> {step > 0 ? 'PROGRESO LOCAL DISPONIBLE' : 'CAPÍTULO 01'} <i /> {step > 0 ? 'CONTINÚA TU SEÑAL' : '10–15 MIN ORIENTATIVOS · DOS FINALES'}</div>
+      <div className="start-caption"><span className="tiny-diamond" /> {hasProgress ? 'PROGRESO LOCAL DISPONIBLE' : 'CAPÍTULO 01'} <i /> {hasProgress ? 'CONTINÚA TU SEÑAL' : 'SIN LÍMITE DE TIEMPO · ESCAPE ROOM'}</div>
       <button className="system-entry" data-open-system onClick={openTechnical}>Behind the System <span>Explorar la ingeniería ↗</span></button>
       <div className="intro-controls"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> MOVERSE</span><span><span className="mouse-icon" /> MIRAR</span><span><kbd>E</kbd> INTERACTUAR</span></div>
     </section>}
@@ -182,13 +197,13 @@ export default function App() {
     {intro && <aside className="scene-caption"><div className="caption-line" /><span>INSTALACIÓN DE CONTENCIÓN / NIVEL −07</span><strong>PROYECTO LAZARUS</strong><small><span className="status-dot" /> {s.progress.power ? 'NÚCLEO EN LÍNEA' : 'ALIMENTACIÓN AUXILIAR'}</small></aside>}
 
     {!intro && !completed && <>
-      <section className="objective" aria-label="Objetivo actual"><span className="eyebrow">INVESTIGACIÓN / {ZONE_LABELS[s.progress.story.zone]} <b>0{step + 1} / 07</b></span><p aria-live="polite">{objective(s.progress)}</p><div className="objective-steps">{[0, 1, 2, 3, 4, 5, 6].map(i => <i key={i} className={step >= i ? 'active' : ''} />)}</div><FirstSteps /></section>
+      <section className="objective" aria-label="Objetivo actual"><span className="eyebrow">INVESTIGACIÓN / {ZONE_LABELS[s.progress.story.zone]} <b>0{step} / 06</b></span><p aria-live="polite">{objective(s.progress)}</p><div className="objective-steps">{[0, 1, 2, 3, 4, 5].map(i => <i key={i} className={step > i ? 'active' : ''} />)}</div><FirstSteps /></section>
       {s.phase === 'playing' && <>
         <div className="entry-shutter" aria-hidden="true" />
         <div className={s.target ? 'crosshair active' : 'crosshair'} aria-hidden="true"><i /><i /></div>
-        {s.target && <button className="interact-prompt" onClick={() => void interact()}><kbd>E</kbd>{targetLabel(s.target)}</button>}
+        {s.target && <div className="world-interactions"><button className="interact-prompt" onClick={() => void interact()}><kbd>E</kbd>{targetLabel(s.target)}</button>{s.target.startsWith('valve:') && !s.progress.story.labSolved && <button className="quick-adjust" onClick={() => { const i = Number(s.target!.at(-1)); adjustRegulator(i, (s.progress.story.dials[i] + 1) % 5); }}><kbd>R</kbd> Girar · lectura {s.progress.story.dials[Number(s.target.at(-1))]}</button>}</div>}
         <section className="echo-message" aria-label="Mensaje ECHO"><div><span className="echo-mark">◇</span><span>ECHO <small>CANAL AUXILIAR</small></span><i /><i /><i /><i /><i /></div><p aria-live="polite">{s.message}</p></section>
-        <div className="journal-access"><button onClick={() => openPanel('journal')}><kbd>J</kbd> Registro · {s.progress.story.documents.length} / 7</button></div>
+        <div className="journal-access"><button onClick={() => openPanel('journal')}><kbd>J</kbd> Registro · {s.progress.story.documents.length} / 7</button><button onClick={() => openPanel('inventory')}><kbd>I</kbd> Inventario · {inventory(s.progress).length}</button></div>
         <div className="game-controls"><kbd>WASD</kbd> MOVERSE <kbd>E</kbd> INTERACTUAR <kbd>ESC</kbd> PAUSA</div>
         <aside className="inventory-indicator" aria-label="Estado de la celda"><span className={s.progress.cell ? 'inventory-cell acquired' : 'inventory-cell'} aria-hidden="true"><i /><i /><i /></span><div><small>CELDA DE ARRANQUE</small><strong>{s.progress.power ? 'CONECTADA AL NÚCLEO' : s.progress.installed ? 'INSTALADA · SIN ALIMENTACIÓN' : s.progress.cell ? 'UNIDAD RECUPERADA' : 'BUSCANDO UNIDAD'}</strong></div></aside>
       </>}
@@ -196,7 +211,7 @@ export default function App() {
       <TouchControls />
     </>}
 
-    <footer className="footer"><span><span className="status-dot" /> {intro ? 'SISTEMAS EN ESPERA' : s.progress.power ? 'RED PRINCIPAL ESTABLE' : 'RED AUXILIAR ACTIVA'}</span><span className="footer-center">{intro ? 'USA AURICULARES PARA UNA MEJOR EXPERIENCIA' : 'LAZARUS / INSTALACIÓN DE INVESTIGACIÓN / NIVEL −07'}</span><span>{s.backend} <i /> {s.quality === 'auto' && 'AUTO / '}{s.tier === 'low' ? 'BAJO · RENDIMIENTO' : s.tier === 'medium' ? 'MEDIO' : 'ALTO'}</span></footer>
+    <footer className="footer"><span><span className="status-dot" /> {intro ? 'SISTEMAS EN ESPERA' : s.progress.power ? 'RED PRINCIPAL ESTABLE' : 'RED AUXILIAR ACTIVA'}</span><span className="footer-center">{intro ? 'USA AURICULARES PARA UNA MEJOR EXPERIENCIA' : 'LAZARUS / INSTALACIÓN DE INVESTIGACIÓN / NIVEL −07'}</span><span>{s.backend} <i /> {s.quality === 'auto' && 'AUTO / '}{QUALITY_LABELS[s.tier].toUpperCase()}</span></footer>
 
     {s.phase === 'terminal' && <Terminal />}
     {(s.phase === 'paused' || (intro && settings)) && <Modal label={settings ? 'Ajustes y controles' : 'Experiencia pausada'} onEscape={() => { setSettings(false); setResetConfirm(false); if (!intro) resume(); }}>
@@ -209,6 +224,7 @@ export default function App() {
       {resetConfirm && <div className="reset-confirm"><p>Se borrará el progreso de este capítulo.</p><button onClick={() => { s.reset(); setSettings(false); setResetConfirm(false); }}>Borrar progreso y volver al inicio</button></div>}
     </Modal>}
     {['document', 'journal', 'valve'].includes(s.phase) && <NarrativePanels />}
+    {(s.phase === 'mechanism' || s.phase === 'inventory') && <EscapePanels />}
     {s.phase === 'technical' && <LoadBoundary><Suspense fallback={<Modal label="Behind the System" onEscape={closeTechnical}><p role="status">Cargando el apartado técnico…</p><button onClick={closeTechnical}>Volver</button></Modal>}><BehindSystem /></Suspense></LoadBoundary>}
     {s.phase === 'cinematic' && s.cinematic && <section className="cinematic-caption" aria-live="polite"><span className="eyebrow">{CINEMA_TEXT[s.cinematic][0]}</span><h2>{CINEMA_TEXT[s.cinematic][1]}</h2><p>{CINEMA_TEXT[s.cinematic][2]}</p><button className="text-button" onClick={() => s.set({ skipCinematic: true })}>Omitir secuencia</button></section>}
     {completed && <Ending />}

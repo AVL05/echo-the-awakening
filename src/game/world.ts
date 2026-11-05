@@ -9,16 +9,7 @@ export const OBJECTS = {
   door: [0, 1.8, -11.7],
 } as const;
 
-// Static architecture only: use Rapier when dynamic bodies become part of the game.
-export function canMove(x: number, z: number, progress: Progress): boolean {
-  const r = 0.28;
-  if (Math.abs(x) > 8.4 - r || z > 12.4 - r || z < -66 + r) return false;
-  if (z < -11.35 && z > -17.65 && (!progress.door || Math.abs(x) > 1.55 - r)) return false;
-  if (z <= -17.65 && !progress.door) return false;
-  if (z < -36.35 && z > -41.65 && (!progress.story.labSolved || Math.abs(x) > 1.55 - r)) return false;
-  if (z <= -41.65 && !progress.story.labSolved) return false;
-  if (z < -60.35 && (progress.story.protocol === 'none' || Math.abs(x) > 1.55 - r)) return false;
-  const obstacles = [
+const obstacles = [
     [-3.1, 3.1, -2.7, 3.1], // reactor base and side supports
     [-6.35, -4.65, 0.65, 2.35], // cell pedestal
     [5.1, 6.5, -2.25, -0.75], // relay
@@ -32,6 +23,20 @@ export function canMove(x: number, z: number, progress: Progress): boolean {
     [6.1, 7.3, 5.8, 7], [-7, -5.8, -7.1, -5.9],
     [-6.1, -4.9, -21.1, -19.9], [5, 6.2, -24.6, -23.4], [5, 6.2, -29.6, -28.4],
     [-6.6, -5.4, -47.6, -46.4], [5.4, 6.6, -56.4, -55.2],
-  ];
+    [-6.5, -5.5, 7.7, 8.3], [-4.75, -3.85, -23.3, -22.7],
+    [6.05, 7.35, -21.05, -20.35], [-1.7, 1.7, -34.5, -33.3],
+    [-7.6, -6.8, -24.75, -24.25],
+    [-2.7, -1.9, -44.8, -44.2], [4.1, 5.5, -58.4, -57.6],
+];
+
+// Static architecture only: use Rapier when dynamic bodies become part of the game.
+export function canMove(x: number, z: number, progress: Progress): boolean {
+  const r = 0.28;
+  if (Math.abs(x) > 8.4 - r || z > 12.4 - r || z < -66 + r) return false;
+  if (z < -11.35 && z > -17.65 && (!progress.door || Math.abs(x) > 1.55 - r)) return false;
+  if (z <= -17.65 && !progress.door) return false;
+  if (z < -36.35 && z > -41.65 && (!progress.story.labSolved || !progress.story.escape.opticsSolved || Math.abs(x) > 1.55 - r)) return false;
+  if (z <= -41.65 && (!progress.story.labSolved || !progress.story.escape.opticsSolved)) return false;
+  if (z < -60.35 && (progress.story.protocol === 'none' || Math.abs(x) > 1.55 - r)) return false;
   return !obstacles.some(([x1, x2, z1, z2]) => x > x1 - r && x < x2 + r && z > z1 - r && z < z2 + r);
 }

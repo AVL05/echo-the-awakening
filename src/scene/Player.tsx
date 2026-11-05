@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Euler, Mesh, Raycaster, Vector2, Vector3 } from 'three';
-import { interact, openPanel } from '../game/actions';
+import { Euler, Mesh, Raycaster, Vector2, Vector3, type Intersection } from 'three';
+import { adjustRegulator, interact, openPanel } from '../game/actions';
 import { useGame, type Target } from '../game/store';
 import { canMove, INTERACT_DISTANCE, SPAWN } from '../game/world';
-import { adaptQuality, damp } from '../game/graphics';
+import { damp } from '../game/graphics';
+import { interactionObjects } from './visibility';
+import { schedulePreparation } from './preparation';
 import { footstep } from '../game/audio';
 import { controls } from '../game/input';
 import { updateStory } from '../game/story';
@@ -14,6 +16,8 @@ const center = new Vector2();
 const direction = new Vector3();
 const rotation = new Euler(0, 0, 0, 'YXZ');
 const upAxis = new Vector3(0, 1, 0);
+const rayTargets: Mesh[] = [];
+const rayHits: Intersection[] = [];
 
 export default function Player() {
   const { camera, gl, scene } = useThree();
@@ -21,12 +25,17 @@ export default function Player() {
   const viewYaw = useRef(0), viewPitch = useRef(0);
   const velocity = useRef(new Vector3());
   const stride = useRef(0), bob = useRef(0), stepDistance = useRef(0), stepSide = useRef(false);
-  const fastWindows = useRef(0);
   const started = useRef(false);
-  const timer = useRef(0), frames = useRef(0), total = useRef(0);
   const rayTimer = useRef(0);
   const reduced = useRef(matchMedia('(prefers-reduced-motion: reduce)').matches);
   const sessionStats = useRef({ seconds: 0, distance: 0 });
+  const pendingSave = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    const cancel = () => { pendingSave.current?.(); pendingSave.current = null; };
+    const unsubscribe = useGame.subscribe(s => { if (s.phase === 'intro') cancel(); });
+    return () => { cancel(); unsubscribe(); };
+  }, []);
 
   useEffect(() => {
     let dragPointer: number | null = null, lastX = 0, lastY = 0;
@@ -38,7 +47,11 @@ export default function Player() {
         e.preventDefault(); controls.keys.add(e.code);
       }
       if (e.code === 'KeyE' && !e.repeat) void interact();
+      if (e.code === 'KeyR' && !e.repeat && s.target?.startsWith('valve:')) {
+        const i = Number(s.target.at(-1)); adjustRegulator(i, (s.progress.story.dials[i] + 1) % 5);
+      }
       if (e.code === 'KeyJ' && !e.repeat) openPanel('journal');
+      if (e.code === 'KeyI' && !e.repeat) openPanel('inventory');
       if (e.code === 'Escape') {
         e.preventDefault(); s.set({ phase: 'paused' });
         if (document.pointerLockElement) document.exitPointerLock();
@@ -98,7 +111,12 @@ export default function Player() {
       sessionStats.current.seconds += Math.min(delta, 0.25);
       if (sessionStats.current.seconds > 5) {
         const stats = s.progress.story.stats;
-        s.save(updateStory(s.progress, { stats: { ...stats, seconds: stats.seconds + sessionStats.current.seconds, distance: stats.distance + sessionStats.current.distance } }));
+        s.set({ progress: updateStory(s.progress, { stats: { ...stats, seconds: stats.seconds + sessionStats.current.seconds, distance: stats.distance + sessionStats.current.distance } }) });
+        // Only periodic statistics wait for idle time; gameplay actions still save immediately.
+        if (!pendingSave.current) pendingSave.current = schedulePreparation(() => {
+          pendingSave.current = null;
+          const current = useGame.getState(); current.save(current.progress);
+        });
         sessionStats.current = { seconds: 0, distance: 0 };
       }
     }
@@ -137,7 +155,9 @@ export default function Player() {
     for (let i = 0; i < 3; i++) {
       if (canMove(camera.position.x + direction.x / 3, camera.position.z, s.progress)) camera.position.x += direction.x / 3;
       else velocity.current.x = 0;
-      if (canMove(camera.position.x, camera.position.z + direction.z / 3, s.progress)) camera.position.z += direction.z / 3;
+      const nextZ = camera.position.z + direction.z / 3;
+      const prepared = (s.labReady || nextZ >= -11.35) && (s.coreReady || nextZ >= -36.35);
+      if (prepared && canMove(camera.position.x, nextZ, s.progress)) camera.position.z = nextZ;
       else velocity.current.z = 0;
     }
     const traveled = Math.hypot(camera.position.x - beforeX, camera.position.z - beforeZ);
@@ -164,8 +184,11 @@ export default function Player() {
     rayTimer.current += dt;
     if (rayTimer.current > 0.1) {
       rayTimer.current = 0; ray.setFromCamera(center, camera); ray.far = INTERACT_DISTANCE;
-      const hits = ray.intersectObjects(scene.children.filter(object => object.visible), true);
-      const hit = hits.find(h => {
+      rayTargets.length = 0;
+      interactionObjects(scene, rayTargets);
+      rayHits.length = 0;
+      ray.intersectObjects(rayTargets, false, rayHits);
+      const hit = rayHits.find(h => {
         for (let parent = h.object.parent; parent; parent = parent.parent) if (!parent.visible) return false;
         if (h.object.userData.interact) return true;
         if (!(h.object instanceof Mesh) || !h.object.visible) return false;
@@ -175,16 +198,6 @@ export default function Player() {
       const target = (hit?.object.userData.interact ?? null) as Target | null;
       if (target !== s.target) s.set({ target });
     }
-    if (s.quality === 'auto') {
-      if (delta < 0.2) { total.current += delta; frames.current++; timer.current += delta; }
-      if (timer.current > 4) {
-        const fps = frames.current / total.current;
-        const result = adaptQuality(s.tier, fps, fastWindows.current);
-        fastWindows.current = result.fastWindows;
-        if (result.tier !== s.tier) s.set({ tier: result.tier });
-        timer.current = frames.current = total.current = 0;
-      }
-    } else { timer.current = frames.current = total.current = fastWindows.current = 0; }
   });
   return null;
 }

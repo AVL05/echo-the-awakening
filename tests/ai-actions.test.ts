@@ -22,7 +22,7 @@ describe('untrusted model actions', () => {
     }
   });
   it('supports real deactivation and reactivation without losing the installed cell', () => {
-    const on = { ...INITIAL, cell: true, installed: true, power: true };
+    const on = restoreSave(JSON.stringify({ cell: true, power: true, door: false, complete: false }));
     const off = applyAction(action('deactivate', 'reactor'), on);
     expect(off.progress).toEqual({ ...on, power: false });
     const resumed = restoreSave(JSON.stringify(off.progress));

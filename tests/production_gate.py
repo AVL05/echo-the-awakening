@@ -18,7 +18,7 @@ for line in (root/'dist'/'_headers').read_text(encoding='utf-8').splitlines():
 results=[]
 with sync_playwright() as p:
     browser = p.chromium.launch(channel='chrome', headless=True, args=['--enable-unsafe-webgpu'])
-    for name, query in [('webgpu',''), ('webgl-forced','?renderer=webgl'), ('webgl-auto','')]:
+    for name, query in [('webgpu','?renderer=webgpu'), ('webgl-forced','?renderer=webgl'), ('webgl-auto','')]:
         context = browser.new_context(viewport={'width':1440,'height':900})
         def local_headers(route):
             response = route.fetch(); headers = dict(response.headers)

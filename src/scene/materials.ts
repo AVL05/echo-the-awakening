@@ -25,6 +25,10 @@ export function surfaceTexture(kind: 'concrete' | 'floor') {
   }
   ctx.strokeStyle = '#333c3c'; ctx.lineWidth = 3;
   if (kind === 'floor') {
+    const bevel = ctx.createLinearGradient(0, 0, 256, 256);
+    bevel.addColorStop(0, '#b1b8ae'); bevel.addColorStop(0.025, '#707b78');
+    bevel.addColorStop(0.07, '#00000000'); bevel.addColorStop(0.93, '#00000000'); bevel.addColorStop(1, '#111b1c');
+    ctx.fillStyle = bevel; ctx.fillRect(3, 3, 250, 250);
     ctx.strokeRect(2, 2, 252, 252);
     ctx.strokeStyle = '#92988d'; ctx.lineWidth = 0.5; ctx.strokeRect(4, 4, 248, 248);
     ctx.strokeStyle = '#78817e'; ctx.lineWidth = 1;
@@ -41,6 +45,12 @@ export function surfaceTexture(kind: 'concrete' | 'floor') {
       ctx.fillStyle = stain; ctx.fillRect(x - r, y - r, r * 2, r * 2);
     }
   } else {
+    for (let i = 0; i < 28; i++) {
+      const x = random() * 256, y = random() * 256;
+      const streak = ctx.createLinearGradient(x, y, x, y + 60);
+      streak.addColorStop(0, '#29333120'); streak.addColorStop(1, '#29333100');
+      ctx.fillStyle = streak; ctx.fillRect(x, y, 1 + random() * 5, 60);
+    }
     ctx.beginPath(); ctx.moveTo(0, 90); ctx.lineTo(256, 90); ctx.stroke();
     ctx.fillStyle = '#404847';
     for (const x of [16, 240]) for (const y of [16, 240]) ctx.fillRect(x, y, 4, 4);
@@ -75,6 +85,31 @@ export function surfaceDetails(albedo: CanvasTexture) {
   return { bump, roughness };
 }
 
+// Baked contact shading for fixed architecture; no extra geometry or render passes.
+export function floorOcclusion(width: number, depth: number, centerZ: number, footprints: readonly [number, number, number, number][]) {
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
+  ctx.globalCompositeOperation = 'multiply';
+  for (const vertical of [false, true]) {
+    const edge = ctx.createLinearGradient(0, 0, vertical ? 0 : 256, vertical ? 256 : 0);
+    edge.addColorStop(0, '#686868'); edge.addColorStop(0.07, '#ffffff');
+    edge.addColorStop(0.93, '#ffffff'); edge.addColorStop(1, '#686868');
+    ctx.fillStyle = edge; ctx.fillRect(0, 0, 256, 256);
+  }
+  for (const [x, z, w, d] of footprints) {
+    ctx.save(); ctx.translate((x / width + 0.5) * 256, ((z - centerZ) / depth + 0.5) * 256);
+    ctx.scale(w * 0.7 / width * 256, d * 0.7 / depth * 256);
+    const shade = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    shade.addColorStop(0, '#606060'); shade.addColorStop(0.65, '#a8a8a8'); shade.addColorStop(1, '#ffffff');
+    ctx.fillStyle = shade; ctx.fillRect(-1, -1, 2, 2); ctx.restore();
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.name = 'ECHO / baked floor occlusion';
+  texture.colorSpace = NoColorSpace;
+  return texture;
+}
+
 // Static softbox environment: approximate reflections without six extra scene renders per frame.
 export function reflectionEnvironment() {
   const faces = Array.from({ length: 6 }, (_, i) => {
@@ -94,8 +129,8 @@ export function reflectionEnvironment() {
   return texture;
 }
 
-export function labelTexture(text: string, color = '#b4c3bd') {
-  const canvas = document.createElement('canvas'); canvas.width = matchMedia('(pointer: coarse)').matches ? 512 : 1024; canvas.height = canvas.width / 4;
+export function labelTexture(text: string, color = '#b4c3bd', width = 1024) {
+  const canvas = document.createElement('canvas'); canvas.width = matchMedia('(pointer: coarse)').matches ? Math.min(512, width) : width; canvas.height = canvas.width / 4;
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = color; const base = canvas.height * 140 / 256; ctx.font = `600 ${base}px Bahnschrift, sans-serif`;
   const size = Math.min(base, base * (canvas.width - 32) / Math.max(ctx.measureText(text).width, 1));

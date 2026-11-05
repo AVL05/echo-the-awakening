@@ -1,18 +1,35 @@
 import { chime } from './audio';
-import { echoCommands } from './commands';
 import { beginTrace, stateChanges, traceStep } from './telemetry';
 import { useGame } from './store';
 import { discover, DOCUMENTS, increment, type DocumentId, type StoryOperation, storyAction } from './story';
+import { escapeAction, ITEMS, MECHANISMS, type EscapeOperation, type ItemId, type Mechanism } from './escape';
 
-export function openPanel(phase: 'journal' | 'document' | 'valve' | 'terminal') {
+export function openPanel(phase: 'journal' | 'document' | 'valve' | 'terminal' | 'inventory' | 'mechanism') {
   useGame.getState().set({ phase, target: null });
   if (document.pointerLockElement) document.exitPointerLock();
 }
 
-export function runStoryAction(name: StoryOperation, value = '') {
+export function runEscapeAction(name: EscapeOperation, value = '') {
   const s = useGame.getState();
-  const traceId = beginTrace(`${name}${value ? ': ' + value : ''}`, 'deterministic');
-  traceStep(traceId, 'interpreted', 'Control determinista del terminal.');
+  const device = name === 'power' ? 'relay' : name === 'mirrors' ? 'optics' : name;
+  const allowed = name === 'take' ? s.phase === 'playing' && s.target === `item:${value}`
+    : name === 'power' && s.phase === 'playing' ? s.target === 'supply-start' && value === s.powerLines && /^[01]{3}$/.test(value)
+    : name === 'mirrors' && s.phase === 'playing' && s.target?.startsWith('mirror:') ? /^[01]{3}$/.test(value) && [...value].every((bit, i) => i === Number(s.target?.at(-1)) || bit === s.progress.story.escape.mirrors[i])
+    : s.phase === 'mechanism' && (name === 'use' ? value.split(':')[1] === s.mechanism : device === s.mechanism);
+  if (!allowed) return { ok: false, text: 'Esta operación exige estar ante el mecanismo físico.', progress: s.progress };
+  const traceId = beginTrace(`${name}: ${value}`, 'physical');
+  traceStep(traceId, 'interpreted', 'Control físico del escape room, sin LLM.');
+  const result = escapeAction(name, value, s.progress);
+  traceStep(traceId, result.ok ? 'executed' : 'rejected', result.text, { changes: stateChanges(s.progress, result.progress) });
+  s.save(result.progress, traceId); s.set({ message: result.text });
+  chime(!result.ok ? 'denied' : !s.progress.power && result.progress.power ? 'power' : name === 'optics' ? 'door' : 'terminal');
+  return result;
+}
+
+export function runStoryAction(name: StoryOperation, value = '', physical = false) {
+  const s = useGame.getState();
+  const traceId = beginTrace(`${name}${value ? ': ' + value : ''}`, physical ? 'physical' : 'deterministic');
+  traceStep(traceId, 'interpreted', physical ? 'Control físico de la instalación.' : 'Control determinista del terminal.');
   const result = storyAction(name, value, s.progress);
   traceStep(traceId, result.ok ? 'validated' : 'rejected', result.text);
   if (result.ok) traceStep(traceId, 'executed', result.text, { changes: stateChanges(s.progress, result.progress) });
@@ -21,7 +38,33 @@ export function runStoryAction(name: StoryOperation, value = '') {
   return result;
 }
 
+export function adjustRegulator(index: number, units: number) {
+  const s = useGame.getState();
+  if (!((s.phase === 'playing' && s.target === `valve:${index}`) || (s.phase === 'valve' && s.valve === index))) return;
+  return runStoryAction('adjust_dial', `${index}:${units}`, true);
+}
+
+export function adjustSupply(index: number) {
+  const s = useGame.getState();
+  if (!Number.isInteger(index) || index < 0 || index > 2 || !/^[01]{3}$/.test(s.powerLines)
+    || s.progress.story.zone !== 'containment' || s.progress.story.protocol !== 'none' || s.progress.story.escape.powerRouted
+    || !((s.phase === 'playing' && s.target === `supply:${index}`) || (s.phase === 'mechanism' && s.mechanism === 'relay'))) return false;
+  const powerLines = [...s.powerLines].map((bit, i) => i === index ? bit === '0' ? '1' : '0' : bit).join('');
+  const trace = beginTrace(`Interruptor ${index + 1}`, 'physical');
+  traceStep(trace, 'validated', 'Mando del distribuidor accesible; selección provisional, sin energizar.');
+  s.set({ powerLines });
+  traceStep(trace, 'executed', `Selección de líneas: ${s.powerLines} → ${powerLines}. El progreso guardado no cambia.`);
+  chime('switch');
+  return true;
+}
+
 export function targetLabel(target: string) {
+  if (target.startsWith('supply:')) return `${useGame.getState().progress.story.escape.powerRouted ? 'Bloqueado' : 'Alternar'} · ${['Soporte vital', 'Archivo', 'Refrigeración'][Number(target.at(-1))]}`;
+  if (target === 'supply-start') return useGame.getState().progress.power ? 'Red estable · arranque validado' : 'Validar y energizar el distribuidor';
+  if (target.startsWith('mirror:')) return `Girar espejo ${'ABC'[Number(target.at(-1))]}`;
+  if (target === 'lab-validator') return 'Comprobar equilibrio del circuito';
+  if (target.startsWith('item:')) return `Recoger · ${ITEMS[target.slice(5) as ItemId].name}`;
+  if (target.startsWith('escape:')) return `Examinar · ${MECHANISMS[target.slice(7) as Mechanism]}`;
   if (target.startsWith('doc:')) return `Leer · ${DOCUMENTS[target.slice(4) as DocumentId].title}`;
   if (target.startsWith('valve:')) return `Ajustar regulador · ${['Contención', 'Refrigeración', 'Análisis'][Number(target.at(-1))]}`;
   return ({ cell: 'Recuperar celda de energía', relay: 'Conectar distribuidor', terminal: 'Conectar con ECHO', door: 'Examinar compuerta', 'lab-terminal': 'ECHO · Validar circuito', 'core-terminal': 'ECHO · Archivo de memorias', 'lab-gate': 'Examinar esclusa del núcleo', 'exit-gate': 'Examinar salida' } as Record<string, string>)[target];
@@ -34,6 +77,18 @@ export async function interact() {
   traceStep(traceId, 'interpreted', 'Objeto señalado por raycasting, a distancia de interacción.');
   traceStep(traceId, 'validated', 'Interacción disponible en la fase de exploración.');
   s.save(increment(s.progress, 'interactions'));
+  if (s.target.startsWith('supply:')) { adjustSupply(Number(s.target.at(-1))); return; }
+  if (s.target === 'supply-start') { runEscapeAction('power', s.powerLines); return; }
+  if (s.target.startsWith('mirror:')) {
+    const i = Number(s.target.at(-1));
+    runEscapeAction('mirrors', [...s.progress.story.escape.mirrors].map((bit, index) => index === i ? bit === '0' ? '1' : '0' : bit).join('')); return;
+  }
+  if (s.target === 'lab-validator') { runStoryAction('calibrate', s.progress.story.dials.join(''), true); return; }
+  if (s.target.startsWith('item:')) { runEscapeAction('take', s.target.slice(5)); s.set({ target: null }); return; }
+  if (s.target.startsWith('escape:') || s.target === 'relay') {
+    s.set({ mechanism: s.target === 'relay' ? 'relay' : s.target.slice(7) as Mechanism });
+    chime('terminal'); openPanel('mechanism'); return;
+  }
   if (s.progress.story.protocol === 'erase' && ['terminal', 'lab-terminal', 'core-terminal'].includes(s.target)) {
     traceStep(traceId, 'rejected', 'ECHO está aislada; el terminal no puede ejecutar instrucciones.');
     s.set({ message: 'ECHO está aislada. No hay enlace disponible. La salida auxiliar permanece abierta.' }); chime('denied'); return;
@@ -55,20 +110,14 @@ export async function interact() {
   }
   if (s.target === 'lab-gate' || s.target === 'exit-gate') {
     traceStep(traceId, 'rejected', 'Esta esclusa exige completar los protocolos de su zona.');
-    s.set({ message: s.target === 'lab-gate' ? 'La esclusa exige equilibrar el circuito del laboratorio y validarlo en ECHO.' : 'El control humano exige verificar los registros y elegir un protocolo en el terminal del núcleo.' }); chime('denied'); return;
+    s.set({ message: s.target === 'lab-gate' ? 'La esclusa exige equilibrio eléctrico y verificación óptica humana.' : 'Prepara el control independiente del archivo y confirma sus consecuencias en ECHO.' }); chime('denied'); return;
   }
   if (s.target === 'cell' && !s.progress.cell) {
+    if (!s.progress.story.escape.locker) { s.set({ message: 'La celda permanece tras el cierre de la taquilla.' }); return; }
     const next = { ...useGame.getState().progress, cell: true };
     traceStep(traceId, 'executed', 'Celda recuperada físicamente.', { changes: stateChanges(s.progress, next) });
     s.save(next, traceId); chime('cell');
-    s.set({ target: null, message: 'Celda de arranque recuperada. Conéctala al distribuidor del ala derecha.' });
-  } else if (s.target === 'relay') {
-    const response = await echoCommands.send('restore', useGame.getState().progress);
-    if (useGame.getState().phase !== 'playing') return;
-    traceStep(traceId, response.progress.power ? 'executed' : 'rejected', response.text, { changes: stateChanges(s.progress, response.progress) });
-    s.save(response.progress, traceId); s.set({ message: response.text });
-    if (response.progress.power && !s.progress.power) chime('power');
-    else if (!response.progress.power) chime('denied');
+    s.set({ target: null, message: 'Celda recuperada. Abre el distribuidor derecho y úsala desde su inventario.' });
   } else if (s.target === 'terminal') {
     traceStep(traceId, 'executed', 'Enlace de ECHO abierto.');
     chime('terminal');

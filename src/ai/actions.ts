@@ -109,7 +109,7 @@ export function applyAction(a: Action, p: Progress): ActionResult {
     const valid = (a.source === 'cell' && a.destination === 'relay' && a.target === 'relay') || (a.source === 'relay' && a.destination === 'reactor' && a.target === 'reactor');
     if (!valid) return result(false, 'La única ruta es celda → distribuidor → reactor.');
   }
-  if (!p.installed) return result(false, 'Primero recupera la celda y conéctala físicamente al distribuidor derecho. No puedo desplazar objetos por ti.');
+  if (!p.installed || !p.story.escape.powerRouted) return result(false, 'Primero instala celda y fusible y valida las líneas en el distribuidor físico. No puedo desplazar objetos por ti.');
   return result(true, a.name === 'transfer_energy' ? 'Transferencia autorizada. El circuito del reactor vuelve a recibir energía.' : 'Alimentación principal activada.', { ...p, power: true });
 }
 

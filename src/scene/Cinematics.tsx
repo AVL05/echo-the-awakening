@@ -27,6 +27,8 @@ export default function Cinematics() {
     const t = reduced.current ? 0.4 : Math.min(time.current / 8, 1);
     const eased = t * t * (3 - 2 * t);
     if (kind === 'lab') { camera.position.set(2.8 - eased * 1.4, 2.8, -18.5 - eased * 3); camera.lookAt(-1, 1.8, -28); }
+    else if (kind === 'preserve') { camera.position.set(4.8 - eased * 1.6, 2.7 + eased, -44.2 - eased * 1.3); camera.lookAt(0, 4.3, -49); }
+    else if (kind === 'erase') { camera.position.set(4.5 + eased, 3.2, -45.2 + eased * 2); camera.lookAt(0, 4.2 - eased * 2, -49 - eased * 12); }
     else { camera.position.set(5.8 - eased * 2.8, 3.7 + eased, -42.5 - eased * 1.8); camera.lookAt(0, 4.2, -49); }
     if (time.current > 8 || s.skipCinematic) {
       camera.position.copy(saved.current.position); camera.quaternion.copy(saved.current.quaternion);

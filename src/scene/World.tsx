@@ -1,6 +1,6 @@
-import { Component, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
-import { ACESFilmicToneMapping, PCFShadowMap, WebGLRenderer, type WebGLRendererParameters } from 'three';
+import { Component, memo, Suspense, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { ACESFilmicToneMapping, PCFShadowMap, SpotLight, WebGLRenderer, type WebGLRendererParameters } from 'three';
 import Room from './Room';
 import Player from './Player';
 import Metrics from './Metrics';
@@ -8,21 +8,39 @@ import { useTelemetry } from '../game/telemetry';
 import StoryRooms from './StoryRooms';
 import Cinematics from './Cinematics';
 import { useGame } from '../game/store';
-import { GRAPHICS } from '../game/graphics';
+import { frameBudget, GRAPHICS, PERFORMANCE_BUDGETS, renderDpr } from '../game/graphics';
 import { aiIsBusy, useEchoAi } from '../ai/controller';
+import { prepareScene } from './preparation';
 
-function InferenceFrameBudget({ fps }: { fps: number }) {
+function FrameBudget({ fps }: { fps: number }) {
   const invalidate = useThree(s => s.invalidate);
   useEffect(() => {
     if (fps === 0) return;
     let frame = 0, previous = 0;
     const tick = (now: number) => {
-      if (!document.hidden && now - previous >= 1000 / fps) { invalidate(); previous = now; }
+      const interval = 1000 / fps, elapsed = now - previous;
+      if (!document.hidden && elapsed >= interval - 0.5) { invalidate(); previous = elapsed >= interval ? now - elapsed % interval : now; }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [fps, invalidate]);
+  return null;
+}
+
+function InitialPreparation() {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    const abort = new AbortController();
+    void prepareScene(gl, scene, camera, abort.signal).catch(error => {
+      if (!abort.signal.aborted) console.warn('ECHO: initial shaders will compile during rendering', error);
+    }).finally(() => {
+      if (abort.signal.aborted) return;
+      useGame.getState().set({ ready: true });
+      useTelemetry.setState(s => ({ metrics: { ...s.metrics, readyMs: performance.now() } }));
+    });
+    return () => abort.abort();
+  }, [gl, scene, camera]);
   return null;
 }
 
@@ -42,6 +60,23 @@ function ContextRecovery() {
   return null;
 }
 
+function ShadowBudget() {
+  const tier = useGame(s => s.tier);
+  const level = useGame(s => s.performanceLevel);
+  const elapsed = useRef(0);
+  useFrame(({ scene }, delta) => {
+    if (tier !== 'laptop') return;
+    elapsed.current += delta;
+    const interval = 1 / PERFORMANCE_BUDGETS[level].shadowHz;
+    if (elapsed.current < interval) return;
+    elapsed.current %= interval;
+    scene.traverseVisible(object => {
+      if (object instanceof SpotLight && object.castShadow) object.shadow.needsUpdate = true;
+    });
+  });
+  return null;
+}
+
 class GraphicsBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
@@ -52,25 +87,29 @@ class GraphicsBoundary extends Component<{ children: ReactNode }, { failed: bool
   }
 }
 
-export default function World() {
+export default memo(function World() {
   const tier = useGame(s => s.tier);
+  const scale = useGame(s => s.resolutionScale);
   const phase = useGame(s => s.phase);
   const [hidden, setHidden] = useState(document.hidden);
+  const [viewport, setViewport] = useState([innerWidth, innerHeight]);
   useEffect(() => { const visibility = () => setHidden(document.hidden); document.addEventListener('visibilitychange', visibility); return () => document.removeEventListener('visibilitychange', visibility); }, []);
+  useEffect(() => { const resize = () => setViewport([innerWidth, innerHeight]); window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize); }, []);
   const profile = GRAPHICS[tier];
   const inferenceBusy = useEchoAi(aiIsBusy);
   const frozen = hidden || ['paused', 'technical', 'complete'].includes(phase);
-  const limited = inferenceBusy || frozen;
-  const fpsBudget = hidden ? 0 : inferenceBusy ? 10 : 0;
+  const fpsBudget = frameBudget(tier, phase, inferenceBusy, hidden);
+  const limited = frozen || fpsBudget > 0;
   return <GraphicsBoundary><div className="world" aria-label="Instalación Lazarus, entorno tridimensional">
-    <Canvas frameloop={limited ? 'demand' : 'always'} shadows={profile.shadowSize ? { type: PCFShadowMap } : false} dpr={Math.min(devicePixelRatio, profile.dpr)} camera={{ fov: 62, near: 0.1, far: 100 }}
+    <Canvas frameloop={limited ? 'demand' : 'always'} shadows={profile.shadowSize ? { type: PCFShadowMap } : false} dpr={renderDpr(tier, viewport[0], viewport[1], devicePixelRatio, scale)} camera={{ fov: 62, near: 0.1, far: 100 }}
       gl={async props => {
-        const options = { ...props, antialias: true, alpha: false } as WebGLRendererParameters;
-        const forced = new URLSearchParams(location.search).get('renderer') === 'webgl';
-        if (!forced && navigator.gpu) {
+        const options = { ...props, antialias: true, alpha: false, powerPreference: 'high-performance' } as WebGLRendererParameters;
+        const requested = new URLSearchParams(location.search).get('renderer');
+        // Conservative default; compare both backends explicitly without switching during play.
+        if (requested === 'webgpu' && navigator.gpu) {
           try {
             const { WebGPURenderer } = await import('three/webgpu');
-            const renderer = new WebGPURenderer({ canvas: options.canvas as HTMLCanvasElement, antialias: true, alpha: false });
+            const renderer = new WebGPURenderer({ canvas: options.canvas as HTMLCanvasElement, antialias: true, alpha: false, powerPreference: 'high-performance' });
             await renderer.init();
             renderer.toneMapping = ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
             const backend = renderer.backend as { isWebGPUBackend?: boolean };
@@ -82,11 +121,8 @@ export default function World() {
         renderer.toneMapping = ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
         useGame.getState().set({ backend: 'WEBGL 2' });
         return renderer;
-      }} onCreated={() => {
-        useGame.getState().set({ ready: true });
-        useTelemetry.setState(s => ({ metrics: { ...s.metrics, readyMs: performance.now() } }));
       }}>
-      <Suspense fallback={null}><Room /><StoryRooms /><Player /><Cinematics /><Metrics /><ContextRecovery /><InferenceFrameBudget fps={fpsBudget} /></Suspense>
+      <Suspense fallback={null}><Room /><StoryRooms /><Player /><Cinematics /><Metrics /><ShadowBudget /><ContextRecovery /><FrameBudget fps={fpsBudget} /><InitialPreparation /></Suspense>
     </Canvas>
   </div></GraphicsBoundary>;
-}
+});

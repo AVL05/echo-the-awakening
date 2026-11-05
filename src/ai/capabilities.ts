@@ -13,7 +13,7 @@ export async function detectCapabilities(env: Environment): Promise<Capability> 
   if (!adapter?.features.has('shader-f16') || adapter.limits.maxStorageBufferBindingSize < 128 * 1024 * 1024) return unavailable('La GPU no ofrece shader-f16 y buffers de 128 MiB requeridos por este modelo.');
   const storage = await env.navigator.storage?.estimate();
   const freeBytes = storage?.quota === undefined ? undefined : storage.quota - (storage.usage ?? 0);
-  if (freeBytes !== undefined && freeBytes < 360 * 1024 * 1024) return unavailable('No se verifican 360 MiB libres para una descarga nueva. Libera espacio y vuelve a comprobar.');
+  // The Worker checks download space after determining whether the model is already cached.
   return { status: 'available', reason: 'Requisitos básicos comprobados. La carga aún puede fallar por memoria o por el controlador; puedes cancelar y seguir sin IA.', ramGB: env.navigator.deviceMemory, freeBytes };
 }
 let checking: Promise<void> | undefined;

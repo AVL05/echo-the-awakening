@@ -3,6 +3,13 @@ let master: GainNode | undefined;
 let noise: AudioBuffer | undefined;
 let reverb: GainNode | undefined;
 let reactor: GainNode | undefined;
+let roomFrequency = 240;
+const fanFilters: BiquadFilterNode[] = [];
+
+export function setRoomAudio(zone: 'containment' | 'lab' | 'core', isolated: boolean) {
+  roomFrequency = isolated ? 90 : zone === 'lab' ? 680 : zone === 'core' ? 150 : 240;
+  if (context) for (const filter of fanFilters) filter.frequency.setTargetAtTime(roomFrequency, context.currentTime, 1.2);
+}
 
 function tone(frequency: number, end: number, duration: number, volume: number, offset = 0, type: OscillatorType = 'sine') {
   if (!context || !master) return;
@@ -53,11 +60,12 @@ export function wakeAudio(muted: boolean) {
       lfo.connect(modulation); modulation.connect(reactor.gain); lfo.start();
       for (const pan of [-0.7, 0.7]) {
         const fan = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain(), stereo = context.createStereoPanner();
-        fan.buffer = noise; fan.loop = true; fan.playbackRate.value = pan < 0 ? 0.7 : 0.93; filter.type = 'lowpass'; filter.frequency.value = 240;
+        fan.buffer = noise; fan.loop = true; fan.playbackRate.value = pan < 0 ? 0.7 : 0.93; filter.type = 'lowpass'; filter.frequency.value = roomFrequency;
+        fanFilters.push(filter);
         gain.gain.value = 0.055; stereo.pan.value = pan;
         fan.connect(filter); filter.connect(gain); gain.connect(stereo); stereo.connect(master); fan.start();
       }
-    } catch { void context?.close().catch(() => {}); context = master = noise = reverb = reactor = undefined; return false; }
+    } catch { void context?.close().catch(() => {}); context = master = noise = reverb = reactor = undefined; fanFilters.length = 0; return false; }
   }
   void context.resume().catch(() => {});
   return true;
@@ -79,7 +87,11 @@ export function footstep(right: boolean) {
   hiss(0.14, 700, 0.1, right ? 0.18 : -0.18); tone(85, 43, 0.12, 0.08);
 }
 
-export function narrativeSound(kind: 'lab' | 'core' | 'preserve' | 'erase') {
+export function narrativeSound(kind: 'lab' | 'core' | 'preserve' | 'erase' | 'awakening' | 'blackout' | 'interference' | 'security' | 'knock') {
+  if (kind === 'knock') { tone(72, 34, .18, .06, 0, 'triangle'); tone(72, 34, .18, .045, .45, 'triangle'); return; }
+  if (kind === 'awakening') { hiss(2, 260, .06, -.65); tone(55, 90, 3, .07, 0, 'triangle'); return; }
+  if (kind === 'blackout') { hiss(1.5, 180, .08, .5); tone(120, 35, 1.8, .08, 0, 'triangle'); return; }
+  if (kind === 'interference' || kind === 'security') { hiss(.7, 1300, .05, -.7); tone(kind === 'security' ? 520 : 330, 180, .5, .05, .15); return; }
   if (kind === 'erase') {
     hiss(5, 380, 0.16); tone(220, 28, 6, 0.18, 0, 'triangle');
     [0, 1.1, 2.2].forEach((t, i) => tone(660 / (i + 1), 38, 2, 0.08, t));
@@ -89,7 +101,8 @@ export function narrativeSound(kind: 'lab' | 'core' | 'preserve' | 'erase') {
   }
 }
 
-export function chime(kind: 'cell' | 'power' | 'door' | 'terminal' | 'denied') {
+export function chime(kind: 'cell' | 'power' | 'door' | 'terminal' | 'denied' | 'switch') {
+  if (kind === 'switch') { tone(230, 90, .07, .1, 0, 'triangle'); hiss(.035, 2200, .025); return; }
   if (kind === 'power') {
     hiss(2.8, 220, 0.32); tone(34, 150, 3.2, 0.36, 0, 'triangle');
     [0.15, 0.65, 1.2].forEach((t, i) => tone(140 + i * 60, 80, 0.2, 0.2, t, 'triangle'));

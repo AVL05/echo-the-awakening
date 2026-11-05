@@ -11,9 +11,10 @@ export class LoadBoundary extends Component<{ children: ReactNode }, { failed: b
   }
 }
 export function LoadingStatus() {
-  const ready = useGame(s => s.ready), backend = useGame(s => s.backend);
+  const ready = useGame(s => s.ready && (!s.progress.door || s.labReady) && (!s.progress.story.labSolved || s.coreReady)), backend = useGame(s => s.backend);
+  const preparing = useGame(s => s.progress.door && !s.labReady ? 'laboratorio' : s.progress.story.labSolved && !s.coreReady ? 'núcleo' : null);
   const [slow, setSlow] = useState(false);
   useEffect(() => { if (ready) return; const timer = setTimeout(() => setSlow(true), 15000); return () => clearTimeout(timer); }, [ready]);
-  if (ready) return null;
-  return <section className="loading-status" aria-label="Carga de la experiencia"><div role="status"><span className="processing-orbit" aria-hidden="true" />{backend === 'INICIALIZANDO' ? 'Descargando el motor y comprobando el renderer…' : `Preparando la escena · ${backend}`}<progress aria-label="Preparando experiencia 3D" /></div><small>La IA no se descarga al iniciar el juego.</small>{slow && <><p>La preparación está tardando más de lo habitual.</p><button onClick={() => location.reload()}>Reintentar carga</button><button onClick={reloadCompatible}>Probar WebGL 2</button></>}</section>;
+  if (ready && !preparing) return null;
+  return <section className="loading-status" aria-label="Carga de la experiencia"><div role="status"><span className="processing-orbit" aria-hidden="true" />{backend === 'INICIALIZANDO' ? 'Descargando el motor y comprobando el renderer…' : preparing ? `Preparando ${preparing}: recursos y shaders…` : `Preparando la escena · ${backend}`}<progress aria-label="Preparando experiencia 3D" /></div><small>La IA no se descarga al iniciar el juego.</small>{slow && <><p>La preparación está tardando más de lo habitual.</p><button onClick={() => location.reload()}>Reintentar carga</button><button onClick={reloadCompatible}>Probar WebGL 2</button></>}</section>;
 }

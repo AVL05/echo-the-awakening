@@ -3,24 +3,36 @@ import { INITIAL, restoreSave, type Progress } from '../src/game/progress';
 import { compactMemory, discover, freshStory, hint, storyAction, updateStory, type DocumentId } from '../src/game/story';
 import { applyAction, deterministicPlan, parsePlan, type Action } from '../src/ai/actions';
 import { canMove } from '../src/game/world';
+import { escapeAction } from '../src/game/escape';
 
-function start(): Progress { return { ...INITIAL, cell: true, installed: true, power: true, door: true, story: { ...freshStory(), zone: 'lab' } }; }
+function start(): Progress { return restoreSave(JSON.stringify({ cell: true, power: true, door: true, complete: false })); }
 function documents(p: Progress, ...ids: DocumentId[]) { return ids.reduce((next, id) => discover(next, id), p); }
-function laboratory() { return storyAction('calibrate', '243', documents(start(), 'manual', 'measurements', 'copy', 'evacuation')).progress; }
-function archive() { return storyAction('verify_archive', 'copy,quarantine,cut', documents(updateStory(laboratory(), { zone: 'core' }), 'quarantine', 'consent')).progress; }
+function laboratory() {
+  let p = storyAction('calibrate', '243', documents(start(), 'manual', 'measurements', 'copy', 'evacuation')).progress;
+  p = escapeAction('take', 'crank', p).progress;
+  for (const value of ['crank:cabinet', 'lens:optics']) p = escapeAction('use', value, p).progress;
+  p = escapeAction('mirrors', '001', p).progress;
+  return escapeAction('optics', '', p).progress;
+}
+function reader() { return escapeAction('use', 'wafer:reader', updateStory(laboratory(), { zone: 'core' })).progress; }
+function archive() { return storyAction('verify_archive', 'copy,quarantine,cut', documents(reader(), 'quarantine', 'consent')).progress; }
+function route(p: Progress, protocol: 'preserve' | 'erase') { return escapeAction('continuity', protocol === 'preserve' ? 'aux:human:aux' : 'off:none:aux', p).progress; }
 
-describe('narrative authority and three-puzzle campaign', () => {
-  it('requires research, the real calibration and a local terminal', () => {
-    expect(storyAction('calibrate', '243', start()).ok).toBe(false);
+describe('narrative authority and connected campaign', () => {
+  it('accepts an observed solution without document clicks and requires a local terminal', () => {
+    const observed = storyAction('calibrate', '243', start());
+    expect(observed.ok).toBe(true);
+    expect(restoreSave(JSON.stringify(observed.progress))).toEqual(observed.progress);
     const researched = documents(start(), 'manual', 'measurements');
     const wrong = storyAction('calibrate', '333', researched);
     expect(wrong.ok).toBe(false); expect(wrong.progress.story.stats.mistakes).toBe(1);
+    expect(wrong.progress.story.dials).toEqual(researched.story.dials);
     expect(wrong.progress.story.labSolved).toBe(false);
     expect(storyAction('calibrate', '243', updateStory(researched, { zone: 'containment' })).ok).toBe(false);
     expect(storyAction('calibrate', '243', researched).progress.story.labSolved).toBe(true);
   });
   it('requires evidence from all three rooms and respects timestamp order', () => {
-    const p = updateStory(laboratory(), { zone: 'core' });
+    const p = reader();
     expect(storyAction('verify_archive', 'copy,quarantine,cut', p).ok).toBe(false);
     const researched = documents(p, 'quarantine');
     expect(storyAction('verify_archive', 'cut,copy,quarantine', researched).progress.story.stats.mistakes).toBe(1);
@@ -31,12 +43,22 @@ describe('narrative authority and three-puzzle campaign', () => {
     for (const protocol of ['preserve', 'erase'] as const) for (const decision of ['trust', 'confront'] as const) {
       expect(storyAction('choose_protocol', protocol, archive()).ok).toBe(false);
       const stance = storyAction('record_decision', decision, archive()).progress;
-      const result = storyAction('choose_protocol', protocol, stance);
+      const result = storyAction('choose_protocol', protocol, route(stance, protocol));
       expect(result.ok).toBe(true); expect(result.progress.story.protocol).toBe(protocol);
       expect(storyAction('choose_protocol', protocol === 'erase' ? 'preserve' : 'erase', result.progress).ok).toBe(false);
       expect(canMove(0, -64, result.progress)).toBe(true);
       const restored = restoreSave(JSON.stringify({ ...result.progress, complete: true }));
       expect(restored).toEqual({ ...result.progress, complete: true });
+    }
+  });
+  it('keeps the verified chronology fixed and both endings intact after reload', () => {
+    const verified = archive();
+    const edited = updateStory(verified, { order: ['cut', 'copy', 'quarantine'] });
+    expect(edited.story.order).toEqual(verified.story.order);
+    const decided = storyAction('record_decision', 'confront', edited).progress;
+    for (const protocol of ['preserve', 'erase'] as const) {
+      const completed = { ...storyAction('choose_protocol', protocol, route(decided, protocol)).progress, complete: true };
+      expect(restoreSave(JSON.stringify(completed))).toEqual(completed);
     }
   });
   it('repairs forged prerequisites and extends old demo saves without discarding power', () => {
@@ -60,13 +82,15 @@ describe('narrative authority and three-puzzle campaign', () => {
   it('keeps compact memory bounded and hides undiscovered incident evidence', () => {
     expect(compactMemory(INITIAL)).not.toContain('04:14');
     expect(compactMemory(archive()).length).toBeLessThan(650);
-    expect(hint(documents(start(), 'manual', 'measurements'))).toContain('x + 2x');
+    let p = documents(start(), 'manual', 'measurements');
+    for (let i = 0; i < 2; i++) p = storyAction('request_hint', '', p).progress;
+    expect(hint(p)).toContain('cantidad x');
     expect(storyAction('request_hint', '', start()).progress.story.stats.hints).toBe(1);
   });
   it('shares deterministic validation with new JSON tools and rejects fabricated arguments', () => {
     const a: Action = { name: 'calibrate', target: 'lab', source: 'none', destination: 'none', value: '243' };
     expect(parsePlan(JSON.stringify({ reply: '', actions: [a] })).actions[0]).toEqual(a);
-    expect(applyAction(a, start()).ok).toBe(false);
+    expect(applyAction(a, start()).ok).toBe(true);
     expect(applyAction(a, documents(start(), 'manual', 'measurements')).progress.story.labSolved).toBe(true);
     expect(() => parsePlan(JSON.stringify({ reply: '', actions: [{ ...a, target: 'protocol' }] }))).toThrow();
     expect(() => parsePlan(JSON.stringify({ reply: '', actions: [{ ...a, value: 243 }] }))).toThrow();

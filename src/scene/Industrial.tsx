@@ -1,20 +1,24 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { AdditiveBlending, BufferGeometry, CanvasTexture, CatmullRomCurve3, CylinderGeometry, DoubleSide, Group, InstancedMesh, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Points, RepeatWrapping, SRGBColorSpace, TubeGeometry, Vector3, type Material } from 'three';
+import { AdditiveBlending, BufferGeometry, CanvasTexture, CatmullRomCurve3, CylinderGeometry, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, Points, RepeatWrapping, SRGBColorSpace, TubeGeometry, Vector3, type Material } from 'three';
 import { UNIT_BOX } from './materials';
 import { useGame } from '../game/store';
 import { isSceneVisible } from './visibility';
-import { GRAPHICS } from '../game/graphics';
+import { GRAPHICS, PERFORMANCE_BUDGETS } from '../game/graphics';
 
 type V3 = [number, number, number];
 export type BoxInstance = { position: V3; size: V3; rotation?: V3 };
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export function BoxInstances({ items, color = '#4d5755', metal = 0.7, roughness = 0.48, glow, shadow = false }: {
-  items: BoxInstance[]; color?: string; metal?: number; roughness?: number; glow?: string; shadow?: boolean;
+export function BoxInstances({ items, color = '#4d5755', metal = 0.7, roughness = 0.48, glow, shadow = false, raycast }: {
+  items: BoxInstance[]; color?: string; metal?: number; roughness?: number; glow?: string; shadow?: boolean; raycast?: InstancedMesh['raycast'];
 }) {
   const ref = useRef<InstancedMesh>(null);
-  const material = useMemo(() => new MeshStandardMaterial({ color, metalness: metal, roughness, emissive: glow ?? '#000000', emissiveIntensity: glow ? 2.2 : 0 }), [color, metal, roughness, glow]);
+  const material = useMemo(() => new MeshStandardMaterial(), []);
+  useLayoutEffect(() => {
+    material.color.set(color); material.metalness = metal; material.roughness = roughness;
+    material.emissive.set(glow ?? '#000000'); material.emissiveIntensity = glow ? 2.2 : 0;
+  }, [material, color, metal, roughness, glow]);
   useLayoutEffect(() => {
     const transform = new Object3D();
     items.forEach((item, i) => {
@@ -25,7 +29,7 @@ export function BoxInstances({ items, color = '#4d5755', metal = 0.7, roughness 
   }, [items, material]);
   useEffect(() => () => { material.dispose(); }, [material]);
   useEffect(() => { const mesh = ref.current; return () => { mesh?.dispose(); }; }, [material, items.length]);
-  return <instancedMesh ref={ref} args={[UNIT_BOX, material, items.length]} castShadow={shadow} receiveShadow dispose={null} />;
+  return <instancedMesh ref={ref} args={[UNIT_BOX, material, items.length]} matrixAutoUpdate={false} castShadow={shadow} receiveShadow dispose={null} raycast={raycast} />;
 }
 
 function Cable({ points, radius = 0.045, color = '#1e282a' }: { points: V3[]; radius?: number; color?: string }) {
@@ -117,6 +121,7 @@ export function ReactorField() {
 
 export function AtmosphericDust() {
   const tier = useGame(s => s.tier);
+  const level = useGame(s => s.quality === 'auto' || s.quality === 'laptop' ? s.performanceLevel : 0);
   const ref = useRef<Points>(null);
   const geometry = useMemo(() => {
     const g = new BufferGeometry();
@@ -126,9 +131,9 @@ export function AtmosphericDust() {
       positions[i * 3 + 1] = 0.4 + ((i * 13.37) % 6.5);
       positions[i * 3 + 2] = Math.cos(i * 31.7) * 11;
     }
-    return g.setFromPoints(Array.from({ length: 320 }, (_, i) => new Vector3().fromArray(positions, i * 3)));
+    return g.setAttribute('position', new Float32BufferAttribute(positions, 3));
   }, []);
-  useEffect(() => { geometry.setDrawRange(0, GRAPHICS[tier].particles); }, [geometry, tier]);
+  useEffect(() => { geometry.setDrawRange(0, Math.round(GRAPHICS[tier].particles * PERFORMANCE_BUDGETS[level].particles)); }, [geometry, tier, level]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   useFrame((_, dt) => { if (ref.current && isSceneVisible(ref.current) && !reduced && useGame.getState().phase !== 'paused') ref.current.rotation.y += dt * 0.005; });
   return <points ref={ref} geometry={geometry} raycast={() => {}}><pointsMaterial color="#cbbd99" size={0.025} sizeAttenuation transparent opacity={0.38} depthWrite={false} /></points>;

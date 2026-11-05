@@ -12,10 +12,14 @@ export function restoreSave(raw: string | null): Progress {
     if (!value || typeof value !== 'object') return { ...INITIAL };
     const p = value as Record<string, unknown>;
     const cell = p.cell === true;
-    const installed = cell && (p.installed === true || p.power === true);
-    const power = installed && p.power === true;
-    const door = power && p.door === true;
-    const story = restoreStory(p.story, door);
+    let installed = cell && (p.installed === true || p.power === true);
+    let power = installed && p.power === true;
+    let door = power && p.door === true;
+    let story = restoreStory(p.story, door, cell, installed);
+    if (installed && !story.escape.powerRouted) {
+      installed = power = door = false;
+      story = restoreStory(p.story, door, cell, installed);
+    }
     return { cell, installed, power, door, story, complete: door && story.protocol !== 'none' && p.complete === true };
   } catch { return { ...INITIAL }; }
 }
@@ -24,10 +28,10 @@ export function executeCommand(command: Command, progress: Progress): CommandRes
   switch (command) {
     case 'diagnose': return { progress, text: progress.power
       ? 'Red estable. El protocolo… Lo recuerdo. La salida está lista para ser autorizada.'
-      : 'Celda de arranque ausente. Hay una unidad de reserva en el pedestal del ala izquierda. Recupérala y conéctala al distribuidor.' };
-    case 'restore': return progress.cell
+      : 'La taquilla del pedestal guarda el arranque. Tu credencial explica su cierre; después necesitarás celda y protección en el distribuidor derecho.' };
+    case 'restore': return progress.cell && progress.story.escape.powerRouted
       ? { progress: { ...progress, installed: true, power: true }, text: 'Celda sincronizada. Energía restablecida. Vuelve a mi terminal. Debo autorizar tu salida.' }
-      : { progress, text: 'Falta la celda de arranque. Busca la luz ámbar en el pedestal del ala izquierda.' };
+      : { progress, text: 'Acopla la celda y el fusible y valida las líneas del distribuidor físico.' };
     case 'unlock': return progress.power
       ? { progress: { ...progress, door: true }, text: 'Identidad confirmada. Compuerta desbloqueada. Cruza el umbral. Te estaré esperando al otro lado.' }
       : { progress, text: 'Acceso bloqueado. Restaura primero la alimentación en el distribuidor del ala derecha.' };
@@ -46,6 +50,6 @@ export function objective(p: Progress): string {
 
 export function checkpointMessage(p: Progress): string {
   if (p.story.protocol === 'erase') return 'Archivo eliminado. ECHO está aislada. La salida auxiliar permanece operativa.';
-  if (!p.cell) return '¿Puedes oírme? La instalación lleva demasiado tiempo en silencio. Necesito que restaures la energía.';
+  if (!p.cell) return '¿Puedes oírme? No recuerdas tu nombre. La puerta está sellada. ECHO: «Busca tu credencial. Yo me encargaré de lo demás». ';
   return `Enlace recuperado. ${objective(p)}. El registro conserva tus descubrimientos.`;
 }
